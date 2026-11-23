@@ -14,7 +14,7 @@ None of it is built yet. This document states what is decided. Goal #436 lists t
   - **The connector**, `cmd/connector`, holds the cluster's identity and is the only program that talks to garam.
   - **They meet only through the Kubernetes API.**
 - **The Bot reconciler is built from the Agent workload code.** What the two share moves out of `internal/controller` into a package below both. One Bot is one StatefulSet of one, whose runtime reads that Bot from a mounted file.
-- **The manager starts a reconciler for each kind the cluster serves**, found by discovery at start. The chart installs no `Agent` CRD, so the chart's manager runs no `Agent` reconciler. No mode flag is added.
+- **The manager starts a reconciler for each kind the cluster serves**, found by discovery at start. The chart installs no `Agent` CRD, so the chart's manager runs no `Agent` reconciler. No mode flag is added. Where `--control-address` is set, a missing `Agent` kind fails the start.
 - **The control-service path is not part of the chart.** `internal/desired`, the `Agent` refresher, the `Agent` kind and the control service stay as `agent.md` and `control.md` describe them, and do not run in a user's cluster.
 
 ### The connection
@@ -39,7 +39,7 @@ These follow [ADR 0088](adr/0088-register-a-connector-with-a-one-time-token-and-
 These follow [ADR 0089](adr/0089-sync-declarations-both-ways-and-give-each-object-one-owner.md).
 
 - **Each object of a declared kind has one owner, `garam` or the cluster**, recorded by interface 1's managed-by marker. A garam-owned object's marker also names the cluster record that applied it.
-- **Each watched namespace is claimed by one release**, through a Lease naming its record. A connector stays out of a namespace another record claimed, so two releases never touch or report each other's objects.
+- **Each watched namespace is claimed by one release**, through a Lease the chart renders naming the release. It never expires, and `helm uninstall` removes it. Helm refuses a second release's claim, and both programs act only under their own release's claim. The claim coordinates. The record's GRN in each object's marker is what isolates one record's objects from another's.
 - **garam-owned objects are applied by server-side apply, and drift in them is reverted.**
 - **Cluster-owned objects are reported to garam and are read-only there.**
 - **A collision is refused, never overwritten.** A name held by a cluster-owned object, or by another record's object, makes the garam declaration a `conflict`.

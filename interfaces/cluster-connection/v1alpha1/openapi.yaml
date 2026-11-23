@@ -246,11 +246,11 @@ components:
             mode: { enum: [apply, reportOnly] }
             namespaces:
               type: array
-              description: The namespaces whose claim the client holds (CLAIM-1).
+              description: The watched namespaces whose claim names the client's release (CLAIM-2).
               items: { type: string }
             claimedElsewhere:
               type: array
-              description: Watched namespaces whose claim names another record (CLAIM-2).
+              description: Watched namespaces with no claim, or a claim naming another release (CLAIM-2).
               items: { type: string }
         declarations:
           type: array

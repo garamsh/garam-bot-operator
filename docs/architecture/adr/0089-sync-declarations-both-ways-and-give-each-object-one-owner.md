@@ -24,7 +24,7 @@ Precedent: argocd-agent has two agent modes. In managed mode "the control plane 
 
 2. **garam's declarations flow to the cluster.** The connector long-polls garam (ADR 0087) for changes to the declarations placed on its cluster, and applies each one by server-side apply under one field manager. It reverts drift in a garam-owned object: a hand edit is undone at the next apply, which happens on every change and at least every 10 minutes.
 
-3. **Cluster-owned objects flow to garam as reports, and garam does not write them.** The connector reports every object of the declared kinds in the namespaces it has claimed (decision 8): owner, identity, generation, spec and status. It also reports the outcome of each garam declaration. garam shows a cluster-owned object read-only, with the cluster as its source.
+3. **Cluster-owned objects flow to garam as reports, and garam does not write them.** The connector reports every object of the declared kinds in the namespaces its release has claimed (decision 8): owner, identity, generation, spec and status. It also reports the outcome of each garam declaration. garam shows a cluster-owned object read-only, with the cluster as its source.
 
 4. **The owner of an object is the only side that changes it, and a collision is refused, never resolved by overwriting.**
    - A garam declaration whose namespace and name are held by a cluster-owned object, or by a garam-owned object of another record, is not applied. The connector reports it as `conflict`, and the object holding the name stays as it is.
@@ -40,7 +40,11 @@ Precedent: argocd-agent has two agent modes. In managed mode "the control plane 
 
 7. **A declaration carries no secret value and names no container image.** A secret appears only as a reference, `<secret-name>/<key>`, to a Secret in the object's namespace, in the form `internal/secretref` states. Which images run is the chart's configuration. The connector refuses a declaration that carries anything else in those places, and reports it as `invalid` (ADR 0091).
 
-8. **A connector acts only in namespaces it has claimed.** Each watched namespace holds one claim, a Lease naming the cluster record. A connector creates the claim where none exists and stays out of a namespace whose claim names another record, reporting it as `claimedElsewhere`. So two releases on one cluster, of two organizations or of one, never overwrite each other's objects, and never report each other's (CLAIM-1, CLAIM-2).
+8. **A connector acts only in namespaces its release has claimed.** Each watched namespace holds one claim, a Lease naming one release as `<release-namespace>/<release-name>` (CLAIM-1 to CLAIM-3).
+   - **Who writes it.** The chart renders the claim, so `helm uninstall` removes it. Helm refuses to install a second release over a Lease another release owns, so an overlap fails at install, in front of the person installing.
+   - **How long it lasts.** It never expires. The programs only read it, and a crashlooping release keeps its namespaces.
+   - **Whose identity it carries.** The release's, the same whether the connector is on or off. So the manager needs no GRN to check it, and turning the connector on changes nothing.
+   - **What it is.** It coordinates releases the cluster's administrator installed. It is not a security boundary: the record's GRN in each garam-owned object's marker is what keeps one record from changing or reporting another's objects.
 
 ## Consequences
 

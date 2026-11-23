@@ -46,6 +46,8 @@ Today `cmd/main.go` always starts the `Agent` reconciler, which needs the `Agent
    **One Bot is one StatefulSet of one, the Agent's shape.** The runtime reads its one Bot from a mounted file, and the bot's tokens are mounted beside it. Running several bots of one organization in one pod (the 11-21 decision's item 6) waits for a runtime that runs them. It is a later change to this reconciler, recorded as an open question in `connector.md`.
 
 4. **The manager starts the reconcilers whose kinds the cluster serves, decided at its composition site.** `cmd/main.go` asks the API server's discovery, once at start, which of `Agent` and interface 1's kinds it serves, and sets up a reconciler for each one served. The chart installs interface 1's CRDs and not `Agent`'s, so the chart's manager runs no `Agent` reconciler, and its Roles name no `Agent` verb. The control path keeps its own condition, `--control-address`, which the chart never sets. No mode flag is added.
+   - The manager logs the kinds it found served and the reconcilers it started.
+   - Where `--control-address` is set, it refuses to start unless `Agent` is served. So in our own system a missing `Agent` CRD fails at start, as it does today, rather than leaving a healthy manager that builds nothing.
 
 5. **The control-service path is not part of the connector.** `internal/desired` (the control feed's puller and the recoverer), `internal/garam`'s refresher for `Agent`s, the `Agent` kind and the control service stay as they are. The connector chart does not deploy them and they do not run in a user's cluster. Retiring them is a later decision.
 

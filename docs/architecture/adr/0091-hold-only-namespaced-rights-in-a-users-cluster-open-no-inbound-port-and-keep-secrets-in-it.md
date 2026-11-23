@@ -23,14 +23,14 @@ The 11-21 decisions (`garamsh/discussions` discussion 6, comments 19791278 and 1
    - The release namespace always holds the leader-election Lease, the cluster key's Secret and the two programs' own objects.
    - The watched namespaces are a chart value, defaulting to the release namespace alone. The chart renders a Role and a RoleBinding in each one for each program.
    - Both programs restrict their caches to those namespaces, so neither lists or watches anything cluster-wide.
-   - Both act only in a watched namespace whose claim (ADR 0089 decision 8) names their release: the cluster record, or, with the connector off, the release itself. Two releases watching one namespace therefore leave it to whichever claimed it first.
+   - The chart renders a claim in each watched namespace (ADR 0089 decision 8), naming the release. Both programs act only where the claim names their own release, which they are configured with, and only read it.
 
 2. **Each program holds only the verbs its own work calls.**
 
    | Program | Rights |
    |---|---|
-   | Manager | The workload objects it builds, in watched namespaces: StatefulSets, claims, Pods and events. Listing and watching Secrets there, to learn whether a referenced one exists. Writing interface-1 objects' status. The claim Lease in each. |
-   | Connector | Writing interface-1 objects, in watched namespaces. Creating Secrets there, and getting and patching them, for the bot credential Secrets it writes. Reading and writing its own key Secret, by name, in the release namespace. The claim Lease in each. |
+   | Manager | The workload objects it builds, in watched namespaces: StatefulSets, claims, Pods and events. Listing and watching Secrets there, to learn whether a referenced one exists. Writing interface-1 objects' status. Getting the claim Lease, by name, in each. |
+   | Connector | Writing interface-1 objects, in watched namespaces. Creating Secrets there, and getting and patching them, for the bot credential Secrets it writes. Reading and writing its own key Secret, by name, in the release namespace. Getting the claim Lease, by name, in each. |
 
    RBAC cannot narrow either further. A Role grants `list` and `watch` on every Secret of its namespace or on none. `resourceNames` cannot bound `create`, and cannot name a bot's credential Secret before the bot exists. So in a watched namespace each program can read every Secret. A watched namespace is one that holds the bots' objects and the Secrets they reference, and nothing else the user would not hand to these two programs. The chart's documentation says so.
 

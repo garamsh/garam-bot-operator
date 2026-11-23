@@ -93,10 +93,14 @@ The suites are built under `conformance/` beside this file, as tests that run ag
 | `client/declarations/reports-orphan` | DECL-13 |
 | `client/declarations/leaves-cluster-owned-alone` | DECL-14 |
 | `client/declarations/report-only-applies-nothing` | DECL-15 |
-| `client/claims/creates-and-renews-claim` | CLAIM-1 |
+| `client/claims/acts-only-under-own-claim` | CLAIM-1, CLAIM-2 |
+| `client/claims/never-writes-a-claim` | CLAIM-2 |
 | `client/claims/stays-out-of-namespace-claimed-elsewhere` | CLAIM-2 |
+| `client/claims/stays-out-of-unclaimed-namespace` | CLAIM-2 |
+| `client/rotation/repeat-after-lost-answer-uses-fresh-jti` | ROT-4, ROT-5 |
+| `client/rotation/keeps-predecessor-after-409-and-failed-exchange` | ROT-5 |
 | `client/reports/whole-view` | REP-1, REP-2 |
-| `client/reports/leaves-out-other-records-objects` | REP-1, CLAIM-2 |
+| `client/reports/leaves-out-other-records-objects` | REP-1, CLAIM-3 |
 | `client/reports/no-secret-or-configmap` | REP-3 |
 | `client/reports/within-10s-of-change` | REP-4 |
 | `client/reports/at-least-every-5m` | REP-4 |

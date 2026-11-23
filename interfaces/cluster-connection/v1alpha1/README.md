@@ -26,7 +26,7 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 - **Declaration:** one object of a declared kind, written in garam and placed on one cluster record. It has an identifier and a generation.
 - **Declared kinds:** the kinds of garam-bot's interface 1 at its `v1alpha1`, Bot, Workspace, WorkspaceClass and BotPool, and no others.
 - **Owner:** `garam` or `cluster`, carried on every object by interface 1's managed-by marker. A garam-owned object's marker also names the cluster record that applied it, by GRN, beside the declaration's identifier and generation.
-- **Own object:** for a client, a garam-owned object whose marker names its own record, or a cluster-owned object in a namespace it has claimed (CLAIM-1).
+- **Own object:** for a client, a garam-owned object whose marker names its own record, or a cluster-owned object in a namespace whose claim names its release (CLAIM-2).
 
 ## Transport
 
@@ -48,7 +48,7 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 - **REG-5.** A token MUST NOT be accepted more than one hour after it was minted.
 - **REG-6.** On success the server answers 201 with `cluster` (the record's GRN), `clientId` and `tokenUrl`. From then on the JWK is the record's only live key, and every key the record held before is withdrawn.
 - **REG-7.** The client MUST NOT retry a registration with the same token after any answer but 429, or after no answer. It reports the failure and waits for a new token. After a 429 it waits as T-6 says and retries.
-- **REG-8.** The server MUST mint a registration token with at least 128 bits from a cryptographically secure random source. It SHOULD bound registration requests per source address, and answer past the bound with 429 before reading the token, so a 429 spends nothing.
+- **REG-8.** The server MUST mint a registration token with at least 128 bits from a cryptographically secure random source. It SHOULD bound registration requests per source address. A server that bounds them MUST answer past the bound with 429 before reading the token, so a 429 spends nothing.
 
 ## Authentication
 
@@ -67,8 +67,8 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
   - `proof`, signed by the successor. Its header `kid` is the successor's thumbprint and its `typ` is `key-proof+jwt`.
 - **ROT-2.** The server MUST refuse the request with 400 `invalid_proof` when either JWS fails to verify, names another audience, has expired or repeats a `jti`, when `authorization` is signed by a key that is not live on the record, or when its `jkt` is not the thumbprint of `jwk`. The bearer token alone MUST NOT rotate a key.
 - **ROT-3.** On success the server answers 201 with the successor's `kid` and `predecessorRetiresAt`, at least 24 hours away. Until then both keys are live.
-- **ROT-4.** A request whose `jwk` is already live on the record MUST be answered as its first success was, with the same `kid` and `predecessorRetiresAt`, provided `authorization` and `proof` verify as ROT-2 requires. Otherwise, when the record already holds two live keys, the server MUST answer 409 `too_many_keys`.
-- **ROT-5.** The client MUST store the successor before it sends the request. It signs with the successor once an answer arrives. When no answer arrives, or the answer is 409, it MUST try an exchange with the successor before trying anything else. An exchange that succeeds means the rotation took place.
+- **ROT-4.** A request whose `jwk` is already live on the record MUST be answered as its first success was, with the same `kid` and `predecessorRetiresAt`, provided `authorization` and `proof` verify as ROT-2 requires. A repeat carries freshly signed JWSs, with new `jti` values. Otherwise, when the record already holds two live keys, the server MUST answer 409 `too_many_keys`.
+- **ROT-5.** The client MUST store the successor before it sends the request. It signs with the successor once an answer arrives. When no answer arrives, or the answer is 409, it MUST try an exchange with the successor before trying anything else. An exchange that succeeds means the rotation took place. When it fails, the client repeats the rotation with fresh JWSs after a lost answer. After a 409 it keeps signing with its predecessor and reports the failure, since another key it did not send is live on the record.
 
 ## Declarations
 
@@ -92,8 +92,9 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 
 ## Namespace claims
 
-- **CLAIM-1.** A client acts in a watched namespace only while it holds that namespace's claim: a `coordination.k8s.io` Lease named `garam-connector-claim` in the namespace, whose holder identity is the client's cluster record GRN. A client creates the claim where none exists, and renews it.
-- **CLAIM-2.** A client MUST NOT apply, delete or report anything in a namespace whose claim names another record. It reports that namespace as `claimedElsewhere` and goes on in the others. So two releases, whether of two organizations or of one, never act in the same namespace.
+- **CLAIM-1.** A namespace's claim is a `coordination.k8s.io` Lease named `garam-connector-claim` in it. Its `holderIdentity` names one release of the client, as `<release-namespace>/<release-name>`, the identity the client is configured with. The claim is created and deleted by whatever installs the client: the connector chart renders it, so `helm uninstall` removes it. It has no duration and never expires.
+- **CLAIM-2.** The client MUST NOT create, update or delete a claim. It acts in a watched namespace only while that namespace's claim exists and names its own release. In any other watched namespace, it applies nothing, deletes nothing and reports nothing, and lists the namespace as `claimedElsewhere`.
+- **CLAIM-3.** The claim coordinates releases the cluster's administrator installed. It is not a security boundary. What keeps one record from changing or reporting another record's garam-owned objects is the record's GRN in their marker (DECL-11, DECL-14, REP-1).
 
 ## Reports
 
@@ -101,13 +102,13 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 
 - **REP-1.** A report is the client's whole view, never a delta. It carries:
   - `observedAt`;
-  - `connector`, with its `version`, its `mode` (`apply` or `reportOnly`), the `namespaces` it holds claims on, and the namespaces it found `claimedElsewhere`;
+  - `connector`, with its `version`, its `mode` (`apply` or `reportOnly`), the `namespaces` whose claim names its release, and the watched namespaces it found `claimedElsewhere`;
   - `declarations`, the outcome of each identifier the client last received: `applied`, `conflict`, `invalid` or `namespaceNotWatched`, with the generation and a message;
-  - `objects`, every own object (see Terms) of a declared kind in the namespaces it holds claims on.
+  - `objects`, every own object (see Terms) of a declared kind in the namespaces whose claim names its release.
 - **REP-2.** Each object carries `apiVersion`, `kind`, `namespace`, `name`, `uid`, `owner`, `generation` and `status`. A garam-owned object also carries its `declarationId` and `orphaned`. A cluster-owned object also carries its `spec`.
 - **REP-3.** A report MUST NOT carry a Secret, a ConfigMap, or any object of a kind that is not declared. A secret is named only as DECL-8 names it.
 - **REP-4.** The client MUST send a report within 10 seconds of a change it observed, and at least every 5 minutes.
-- **REP-5.** The server answers 204. It keeps only the report with the latest `observedAt` and ignores an older one. It records the time of every authenticated request as the record's `lastContactAt`.
+- **REP-5.** The server answers 204 to a report it accepts. It keeps only the report with the latest `observedAt` and ignores an older one. It records the time of every authenticated request as the record's `lastContactAt`.
 - **REP-6.** A body over 4 MiB MAY be answered 413 `report_too_large`. The client then reports the error and goes on applying declarations.
 - **REP-7.** A report is untrusted input. The server MUST refuse, with 400 `invalid_request`, a report carrying an object of a kind that is not declared, or a Secret or ConfigMap.
 - **REP-8.** The server MUST ignore an outcome or an object that names a declaration identifier not placed on the reporting record. It records nothing of either.
