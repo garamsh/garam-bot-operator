@@ -47,8 +47,8 @@ Partitioning the operator by domain is a change of its own, which no pull reques
 ### Interface specifications
 
 - **`interfaces/<name>/<version>/` holds the specification of a boundary between separately built components, and is no domain** ([ADR 0092](adr/0092-specify-the-garam-connector-boundary-as-the-cluster-connection-interface-with-conformance-suites.md)). `interfaces/cluster-connection/v1alpha1/` is the first: garam to the connector.
-  - **What it holds:** the normative specification, its schemas and its conformance test list. The conformance suites and the reference server will be built under it too.
-  - **What it imports:** no domain of either binary, because another repository's implementation runs its suites.
+  - **What it holds:** the normative specification, its schemas and its conformance test list. The reference server is in `reference/`, with its binary in `reference/cmd/cluster-connection-reference/` (#438). The conformance suites will be built under it too.
+  - **What it imports:** no domain of either binary, because another repository's implementation runs its suites. It may reach a package below every binary that states a rule of its specification: the reference server parses DECL-8's `<secret-name>/<key>` with `internal/secretref`.
 - **The connector will be a third binary, `cmd/connector`, with its own composition site** ([ADR 0090](adr/0090-run-the-connector-as-a-binary-beside-the-manager-and-build-the-bot-reconciler-from-the-agent-workload.md)). It follows `stack-go.md` alone. It shares no domain with the manager or the control service, and may reach `internal/machinetoken` and `internal/secretref`, which sit below every binary. It is unbuilt.
 
 ### A new domain

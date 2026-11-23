@@ -11,10 +11,10 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 
   | Side | Production | Reference |
   |---|---|---|
-  | Server | garam's connection service, in `garamsh/garam` | An in-memory server, to be built in `reference/` beside this file |
+  | Server | garam's connection service, in `garamsh/garam` | An in-memory server, in `reference/` beside this file |
   | Client | The connector, `cmd/connector` in `garamsh/garam-bot-operator` | The server suite's own client, to be built in `conformance/` beside this file |
 
-  None of the four is built when this version is written.
+  The reference server is built. The other three are not.
 
 - **What `v1` needs:** two production server implementations and two production client implementations that pass `conformance.md`.
 
