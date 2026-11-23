@@ -122,7 +122,7 @@ components:
         message: { type: string }
     Grn:
       type: string
-      pattern: "^grn:[^/]+/platform/cluster/[^/]+$"
+      pattern: "^grn:[^/]+/iam/cluster/[^/]+$"
     PublicJwk:
       type: object
       description: The public half of an RSA key of at least 3072 bits. A member naming a private parameter (d, p, q, dp, dq, qi) is refused.

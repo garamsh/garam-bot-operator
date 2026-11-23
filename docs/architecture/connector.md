@@ -26,7 +26,7 @@ None of it is built yet. This document states what is decided. Goal #436 lists t
 
 These follow [ADR 0088](adr/0088-register-a-connector-with-a-one-time-token-and-a-key-it-generates-in-the-cluster.md).
 
-- **A cluster is a garam resource, `grn:<org>/platform/cluster/<id>`, in one organization.** One chart release is one record. A second organization on the same cluster is a second release in another namespace.
+- **A cluster is a garam resource, `grn:<org>/iam/cluster/<id>`, in one organization.** One chart release is one record. A second organization on the same cluster is a second release in another namespace.
 - **Registration spends a one-time token.** The token lives one hour, is good for one attempt, and garam keeps only its hash. The connector generates an RSA 3072 key itself and sends the public JWK with the token.
 - **The private key never leaves the cluster.** It exists in the connector's process and in one Secret in the release namespace.
 - **The connector authenticates as garam's other machine callers do,** by `private_key_jwt` under `machine-token.v2`, through `internal/machinetoken`.
@@ -63,7 +63,7 @@ These are obligations on `garamsh/garam`, for that repository to decide and buil
 | Obligation | From |
 |---|---|
 | Serve `interfaces/cluster-connection/v1alpha1/` and pass its server suite in CI | ADR 0092 |
-| A Cluster resource, `grn:<org>/platform/cluster/<id>`, with browser routes to create, read, rename, describe and delete it, and to revoke its keys | ADR 0088 |
+| A Cluster resource, `grn:<org>/iam/cluster/<id>`, with browser routes to create, read, rename, describe and delete it, and to revoke its keys | ADR 0088 |
 | Mint a one-time registration token on creation and on re-registration, under a new garam ADR superseding garam ADR-0117 in part | ADR 0088 |
 | Store what ADR 0088 decision 8 lists, and nothing it excludes | ADR 0088 |
 | `iam:cluster.register`, `.read`, `.update`, `.reissue` and `.delete` | ADR 0088 |

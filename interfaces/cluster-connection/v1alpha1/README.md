@@ -22,7 +22,7 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 
 - **Server:** whatever serves this protocol for garam. Where garam serves it is garam's to decide.
 - **Client:** a connector. One client is one cluster record of one organization.
-- **Cluster record:** the garam resource `grn:<org>/platform/cluster/<id>` that the client authenticates as.
+- **Cluster record:** the garam resource `grn:<org>/iam/cluster/<id>` that the client authenticates as.
 - **Declaration:** one object of a declared kind, written in garam and placed on one cluster record. It has an identifier and a generation.
 - **Declared kinds:** the kinds of garam-bot's interface 1 at its `v1alpha1`, Bot, Workspace, WorkspaceClass and BotPool, and no others.
 - **Owner:** `garam` or `cluster`, carried on every object by interface 1's managed-by marker.

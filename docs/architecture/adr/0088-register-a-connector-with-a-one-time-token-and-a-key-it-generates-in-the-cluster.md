@@ -24,7 +24,7 @@ Precedents for the same shape:
 
 ## Decision
 
-1. **A cluster is a garam resource of its own, `grn:<org>/platform/cluster/<id>`, in one organization.** The record is the connector's machine identity, and it is the target that declarations are placed on (ADR 0089). It is not an Operator record: the Operator record carries hosted-operator delegation, grants and a control endpoint, and none of those applies to a connected cluster.
+1. **A cluster is a garam resource of its own, `grn:<org>/iam/cluster/<id>`, in one organization.** It sits under `iam` because garam's catalogue places every machine identity there, `operator`, `supervisor` and, by garam ADR-0179, `bot` (`docs/architecture/grn-model.md` §Types by owning service). The record is the connector's machine identity, and it is the target that declarations are placed on (ADR 0089). It is not an Operator record: the Operator record carries hosted-operator delegation, grants and a control endpoint, and none of those applies to a connected cluster.
 
 2. **One chart release is one cluster record in one organization.** A second organization connecting the same physical cluster installs a second release, in another namespace, and registers a second record. A release never serves two organizations. This follows the 11-21 decision that organizations are not mixed.
 
