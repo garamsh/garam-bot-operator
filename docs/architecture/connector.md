@@ -13,7 +13,8 @@ None of it is built yet. This document states what is decided. Goal #436 lists t
   - **The manager** reconciles garam-bot's interface-1 objects into workloads. It needs no garam connection, so the chart with the connector off is the cluster mode that works without garam.
   - **The connector**, `cmd/connector`, holds the cluster's identity and is the only program that talks to garam.
   - **They meet only through the Kubernetes API.**
-- **The Bot reconciler is built from the Agent workload code.** What the two share moves out of `internal/controller` into a package below both. A pool's garam-bot pod runs one organization's bots as processes of one runtime, reading the Bot objects from a file.
+- **The Bot reconciler is built from the Agent workload code.** What the two share moves out of `internal/controller` into a package below both. One Bot is one StatefulSet of one, whose runtime reads that Bot from a mounted file.
+- **The manager starts a reconciler for each kind the cluster serves**, found by discovery at start. The chart installs no `Agent` CRD, so the chart's manager runs no `Agent` reconciler. No mode flag is added.
 - **The control-service path is not part of the chart.** `internal/desired`, the `Agent` refresher, the `Agent` kind and the control service stay as `agent.md` and `control.md` describe them, and do not run in a user's cluster.
 
 ### The connection
@@ -30,18 +31,19 @@ These follow [ADR 0088](adr/0088-register-a-connector-with-a-one-time-token-and-
 - **Registration spends a one-time token.** The token lives one hour, is good for one attempt, and garam keeps only its hash. The connector generates an RSA 3072 key itself and sends the public JWK with the token.
 - **The private key never leaves the cluster.** It exists in the connector's process and in one Secret in the release namespace.
 - **The connector authenticates as garam's other machine callers do,** by `private_key_jwt` under `machine-token.v2`, through `internal/machinetoken`.
-- **It rotates its own key every 30 days**, on a call signed by its current key with a proof from the successor. garam's 24-hour rollover holds both keys live.
+- **It rotates its own key every 30 days.** The rotation call carries an authorization the current key signed, naming the successor, and a proof the successor signed. The bearer token alone rotates nothing. garam's 24-hour rollover holds both keys live. A repeated rotation answers as the first did, and a connector with no answer tries its stored successor.
 - **Revocation is garam's**: withdrawing a key or deleting the record refuses the next request. A lost key is registered again under the same record.
 
 ### Declarations and ownership
 
 These follow [ADR 0089](adr/0089-sync-declarations-both-ways-and-give-each-object-one-owner.md).
 
-- **Each object of a declared kind has one owner, `garam` or the cluster**, recorded by interface 1's managed-by marker.
+- **Each object of a declared kind has one owner, `garam` or the cluster**, recorded by interface 1's managed-by marker. A garam-owned object's marker also names the cluster record that applied it.
+- **Each watched namespace is claimed by one release**, through a Lease naming its record. A connector stays out of a namespace another record claimed, so two releases never touch or report each other's objects.
 - **garam-owned objects are applied by server-side apply, and drift in them is reverted.**
 - **Cluster-owned objects are reported to garam and are read-only there.**
-- **A collision is refused, never overwritten.** The connector reports the garam declaration as `conflict`.
-- **Deletion is by explicit tombstone only.** An object the full set no longer names is reported `orphaned` and left in place.
+- **A collision is refused, never overwritten.** A name held by a cluster-owned object, or by another record's object, makes the garam declaration a `conflict`.
+- **Deletion is by explicit tombstone only.** garam records how far it has purged tombstones, and a cursor at or before that point reads the full set again. An object the full set no longer names is reported `orphaned` and left in place.
 - **Losing garam changes nothing in the cluster.**
 - **A declaration carries secrets only as `<secret-name>/<key>` references, and names no image.**
 
@@ -49,9 +51,9 @@ These follow [ADR 0089](adr/0089-sync-declarations-both-ways-and-give-each-objec
 
 These follow [ADR 0091](adr/0091-hold-only-namespaced-rights-in-a-users-cluster-open-no-inbound-port-and-keep-secrets-in-it.md).
 
-- **Rights:** Roles and RoleBindings in the release namespace and in each watched namespace, and no ClusterRole at runtime. Caches are restricted to those namespaces.
+- **Rights:** Roles and RoleBindings in the release namespace and in each watched namespace, and no ClusterRole at runtime. Caches are restricted to those namespaces. RBAC cannot narrow Secret access below a namespace, so each program can read every Secret of a watched namespace, and a watched namespace holds only the bots' objects and the Secrets they reference.
 - **CRDs:** installed by Helm with the installer's rights, and the only cluster-scoped objects the chart renders.
-- **No inbound path:** no LoadBalancer or NodePort Service, no Ingress, no webhook. A NetworkPolicy admits no ingress, and egress goes only to garam on 443, the API server and DNS.
+- **No inbound path:** no LoadBalancer or NodePort Service, no Ingress, no webhook. A NetworkPolicy admits no ingress. Egress goes to the configured proxy, or else to garam on 443, plus DNS, plus the API server's range given as a value.
 - **Metrics:** off by default, and plain HTTP inside the cluster when turned on.
 - **Secrets:** no Secret or ConfigMap is ever reported, and no credential reaches a log, metric, event, status or report.
 - **Images:** pinned by digest in the chart. A user can set the connector to report only.
@@ -70,7 +72,8 @@ These are obligations on `garamsh/garam`, for that repository to decide and buil
 | Write a bot or workspace declaration placed on a cluster and namespace, with an identifier, a generation and a tombstone on delete | ADR 0089 |
 | Refuse a declaration that names an image, carries a secret value, or takes a name a cluster-owned object holds in the latest report | ADR 0089, ADR 0091 |
 | Show a cluster's reported objects, read-only where cluster-owned, with each declaration's outcome and `lastContactAt` | ADR 0089 |
-| Let a cluster's token mint the garam tokens of a garam-owned bot placed on that cluster, and reach no other operation | ADR 0090, ADR 0088 |
+| Let a cluster's token mint the garam tokens of a garam-owned bot placed on that cluster by a live declaration, and no other bot's, and reach no other operation (AUTH-4, AUTH-5) | ADR 0090, ADR 0088 |
+| Treat a report as untrusted input: refuse undeclared kinds, ignore what names another record's declarations, and render cluster-owned specs as text only (REP-7 to REP-9) | ADR 0089 |
 
 ## Rationale
 
@@ -86,6 +89,7 @@ These are obligations on `garamsh/garam`, for that repository to decide and buil
 
 - **A cluster-owned bot's garam identity.** Does it get a GRN and tokens, and on whose authority?
 - **Adoption.** An explicit action that moves an object between `garam` and the cluster as owner.
+- **Several bots in one pod.** The 11-21 decision's one pod per organization, with a process per bot, waits for a garam-bot runtime that runs several bots. This goal runs one Bot per StatefulSet.
 - **Sealed static keys.** The owner's decision of 2026-11-21, item 5, deferred past the first goal on 2026-11-24.
 - **Where users pull the chart and the images from.** Today's repositories are private ECR (`delivery.md`), which a user's cluster cannot pull from.
 - **How garam-bot's interface 1 kinds are served here.** `stack-kubebuilder.md` §1 says this project is single-group, and interface 1's group is an open question in `garamsh/garam-bot#1193`.

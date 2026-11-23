@@ -23,7 +23,9 @@ The owner decided on 2026-11-24, answering this goal's questions:
 - The goal depends on garam-bot's interface 1 (`garamsh/garam-bot#1193`) and on a garam-bot runtime image that runs one Bot.
 - The control service and the `Agent` kind stay untouched in this goal, and their retirement is decided later.
 
-The 11-21 decision (item 6) makes one pod one PC: one garam-bot runs one organization's bots, with a process per bot.
+The 11-21 decision (item 6) makes one pod one PC: one garam-bot runs one organization's bots, with a process per bot. The runtime this goal depends on runs one Bot, so this goal does not reach that shape.
+
+Today `cmd/main.go` always starts the `Agent` reconciler, which needs the `Agent` CRD and RBAC on it, and starts the control path only where `--control-address` is set.
 
 ## Decision
 
@@ -41,11 +43,13 @@ The 11-21 decision (item 6) makes one pod one PC: one garam-bot runs one organiz
    - the restricted security context;
    - pull-always, and the grace period.
 
-   The garam-bot pod differs from the Agent pod in one way. It runs one organization's bots of one pool as processes of one runtime, so the Bot objects of a pool are rendered into a file the runtime reads, and each bot's tokens are mounted beside it.
+   **One Bot is one StatefulSet of one, the Agent's shape.** The runtime reads its one Bot from a mounted file, and the bot's tokens are mounted beside it. Running several bots of one organization in one pod (the 11-21 decision's item 6) waits for a runtime that runs them. It is a later change to this reconciler, recorded as an open question in `connector.md`.
 
-4. **The control-service path is not part of the connector.** `internal/desired` (the control feed's puller and the recoverer), `internal/garam`'s refresher for `Agent`s, the `Agent` kind and the control service stay as they are. The connector chart does not deploy them and they do not run in a user's cluster. Retiring them is a later decision.
+4. **The manager starts the reconcilers whose kinds the cluster serves, decided at its composition site.** `cmd/main.go` asks the API server's discovery, once at start, which of `Agent` and interface 1's kinds it serves, and sets up a reconciler for each one served. The chart installs interface 1's CRDs and not `Agent`'s, so the chart's manager runs no `Agent` reconciler, and its Roles name no `Agent` verb. The control path keeps its own condition, `--control-address`, which the chart never sets. No mode flag is added.
 
-5. **ADR 0079's seams are kept, and the connector takes the place that seam asks for.**
+5. **The control-service path is not part of the connector.** `internal/desired` (the control feed's puller and the recoverer), `internal/garam`'s refresher for `Agent`s, the `Agent` kind and the control service stay as they are. The connector chart does not deploy them and they do not run in a user's cluster. Retiring them is a later decision.
+
+6. **ADR 0079's seams are kept, and the connector takes the place that seam asks for.**
    - The manager provisions no identity.
    - Every connection leaves the cluster.
    - garam relays nothing into it.
@@ -53,7 +57,7 @@ The 11-21 decision (item 6) makes one pod one PC: one garam-bot runs one organiz
 
    garam sending declarations is garam acting as the source of desired state, the role the control service holds for `Agent`s. It is not a relay between the manager and another service.
 
-6. **The connector mints a garam-owned bot's tokens under the cluster's identity**, as ADR 0073's refresher does for an agent under the operator's. It writes them to that bot's credential Secret, which the bot's runtime mounts. The bot never holds the cluster's key. The mint route and the bot's identity are garam's bot decision (`garamsh/garam#2027`). Whether a cluster-owned bot gets a garam identity is an open question in `connector.md`.
+7. **The connector mints a garam-owned bot's tokens under the cluster's identity**, as ADR 0073's refresher does for an agent under the operator's. It mints only for bots placed on its own record (AUTH-5), and writes them to that bot's credential Secret, which the bot's runtime mounts. The bot never holds the cluster's key. The mint route and the bot's identity are garam's bot decision (`garamsh/garam#2027`). Whether a cluster-owned bot gets a garam identity is an open question in `connector.md`.
 
 ## Consequences
 
@@ -61,7 +65,8 @@ The 11-21 decision (item 6) makes one pod one PC: one garam-bot runs one organiz
 - The cluster's key sits in a Pod that does not build workloads, and the Pod that builds workloads holds no key. Each of the two holds only the permissions its own work needs (ADR 0091).
 - The image count rises to three published programs: manager, control and connector. `delivery.md` gains the connector's image when the chart issue builds it.
 - The extraction from `internal/controller` changes the Agent reconciler's code without changing its behaviour. Its envtest suite is what holds that.
-- This goal depends on two pieces from garam-bot: interface 1's kinds and managed-by marker, and a runtime image that reads Bot objects from files and runs one process per bot. The goal issue lists them.
+- This goal depends on two pieces from garam-bot: interface 1's kinds and managed-by marker, and a runtime image that reads one Bot from a file and runs it. The goal issue lists them.
+- Reconcilers chosen by discovery mean a CRD installed after the manager started is picked up at its next restart, not at once.
 
 ## Signs the decision was wrong
 
@@ -72,5 +77,6 @@ The 11-21 decision (item 6) makes one pod one PC: one garam-bot runs one organiz
 ## Rejected alternatives
 
 - **The connector as `Runnable`s inside the manager**, as the puller and the refresher are today. It is one fewer image, but the manager would provision its own identity, against ADR 0079's seam. Its Pod would also hold both the cluster's key and the right to build workloads.
+- **A mode flag, or a second manager binary, to leave out the `Agent` reconciler.** A flag is a special case at every reconciler. A second manager binary leaves `cmd/main.go`, the path `stack-kubebuilder.md` §1 fixes for the manager.
 - **Rendering a garam Bot as today's `Agent` kind.** The `sherlock` type it builds is superseded by garam-bot ADR 0031 (`garamsh/garam-bot@542306b0f1ade6e997068e11fcdf92685d40a7e1`), and the owner chose the dependency on garam-bot instead.
 - **Making the hosted control service the source of declarations for a connected cluster.** garam owns the dashboard, the bot's identity and its policy (11-21 decisions), so garam is where a declaration is written. A second store would need its own sync.

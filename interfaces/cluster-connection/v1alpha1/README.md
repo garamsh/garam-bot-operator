@@ -25,7 +25,8 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 - **Cluster record:** the garam resource `grn:<org>/iam/cluster/<id>` that the client authenticates as.
 - **Declaration:** one object of a declared kind, written in garam and placed on one cluster record. It has an identifier and a generation.
 - **Declared kinds:** the kinds of garam-bot's interface 1 at its `v1alpha1`, Bot, Workspace, WorkspaceClass and BotPool, and no others.
-- **Owner:** `garam` or `cluster`, carried on every object by interface 1's managed-by marker.
+- **Owner:** `garam` or `cluster`, carried on every object by interface 1's managed-by marker. A garam-owned object's marker also names the cluster record that applied it, by GRN, beside the declaration's identifier and generation.
+- **Own object:** for a client, a garam-owned object whose marker names its own record, or a cluster-owned object in a namespace it has claimed (CLAIM-1).
 
 ## Transport
 
@@ -46,7 +47,8 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 - **REG-4.** The server MUST answer a spent, expired or unknown token with one answer: 401 `registration_refused`.
 - **REG-5.** A token MUST NOT be accepted more than one hour after it was minted.
 - **REG-6.** On success the server answers 201 with `cluster` (the record's GRN), `clientId` and `tokenUrl`. From then on the JWK is the record's only live key, and every key the record held before is withdrawn.
-- **REG-7.** The client MUST NOT retry a registration with the same token after any answer or after no answer. It reports the failure and waits for a new token.
+- **REG-7.** The client MUST NOT retry a registration with the same token after any answer but 429, or after no answer. It reports the failure and waits for a new token. After a 429 it waits as T-6 says and retries.
+- **REG-8.** The server MUST mint a registration token with at least 128 bits from a cryptographically secure random source. It SHOULD bound registration requests per source address, and answer past the bound with 429 before reading the token, so a 429 spends nothing.
 
 ## Authentication
 
@@ -54,15 +56,19 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 - **AUTH-2.** The server MUST read, on every request, that the token is live, that its cluster record exists and that the key it was exchanged under is live. A request failing any of these MUST be answered 401.
 - **AUTH-3.** On a 401 the client MUST exchange once more and repeat the request once. A second 401 is reported and backed off as T-6 says.
 - **AUTH-4.** A token of a cluster record MUST reach only this protocol's routes and the bot-token mint garam names for a cluster. Every other machine operation MUST refuse it.
+- **AUTH-5.** The bot-token mint MUST refuse a cluster record's token for a bot that is not placed on that record by a live declaration.
 
 ## Key rotation
 
 `POST /cluster-connection/v1alpha1/clusters/self/keys`
 
-- **ROT-1.** The request carries `jwk`, the successor's public half, and `proof`. The proof is a compact JWS the successor signed RS256: header `kid` is the successor's thumbprint and `typ` is `key-proof+jwt`; claims `iss` and `sub` are `clientId`, `aud` is this route's absolute URL, `jti` is fresh, and `exp` is at most 60 seconds after `iat`.
-- **ROT-2.** The server MUST refuse a proof that does not verify against `jwk`, names another audience, has expired, or repeats a `jti`, with 400 `invalid_proof`. It MUST refuse when the record already holds two live keys, with 409 `too_many_keys`.
+- **ROT-1.** The request carries `jwk`, the successor's public half, and two compact JWS, each signed RS256 with claims `iss` and `sub` equal to `clientId`, `aud` equal to this route's absolute URL, a fresh `jti`, and `exp` at most 60 seconds after `iat`:
+  - `authorization`, signed by a live key of the record. Its header `kid` is that key's thumbprint, its `typ` is `key-rotation+jwt`, and its claim `jkt` is the successor's RFC 7638 thumbprint.
+  - `proof`, signed by the successor. Its header `kid` is the successor's thumbprint and its `typ` is `key-proof+jwt`.
+- **ROT-2.** The server MUST refuse the request with 400 `invalid_proof` when either JWS fails to verify, names another audience, has expired or repeats a `jti`, when `authorization` is signed by a key that is not live on the record, or when its `jkt` is not the thumbprint of `jwk`. The bearer token alone MUST NOT rotate a key.
 - **ROT-3.** On success the server answers 201 with the successor's `kid` and `predecessorRetiresAt`, at least 24 hours away. Until then both keys are live.
-- **ROT-4.** The client MUST store the successor before it sends the request, and MUST sign with the successor once the answer arrives.
+- **ROT-4.** A request whose `jwk` is already live on the record MUST be answered as its first success was, with the same `kid` and `predecessorRetiresAt`, provided `authorization` and `proof` verify as ROT-2 requires. Otherwise, when the record already holds two live keys, the server MUST answer 409 `too_many_keys`.
+- **ROT-5.** The client MUST store the successor before it sends the request. It signs with the successor once an answer arrives. When no answer arrives, or the answer is 409, it MUST try an exchange with the successor before trying anything else. An exchange that succeeds means the rotation took place.
 
 ## Declarations
 
@@ -73,16 +79,21 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 - **DECL-3.** When a change exists after the cursor, the server MUST answer at once. Otherwise it MUST hold the request up to `wait` seconds and answer as soon as a change is written. `wait` is from 0 to 50 and defaults to 50.
 - **DECL-4.** An answer with no change carries the same cursor and an empty `changes`.
 - **DECL-5.** An answer MAY carry `more: true`. The client then asks again at once with the new cursor. A full set is complete only at the answer with `more` absent or false.
-- **DECL-6.** The server MUST keep a tombstone for at least 30 days. A cursor older than its oldest tombstone MUST be answered 410 `cursor_expired`, and the client then reads the full set.
+- **DECL-6.** The server MUST keep a tombstone for at least 30 days. It records, per cluster record, the latest position up to which it has purged tombstones. A cursor at or before that position MUST be answered 410 `cursor_expired`, whether or not any tombstone remains. The client then reads the full set.
 - **DECL-7.** A declaration's object carries `apiVersion`, `kind`, `metadata.namespace`, `metadata.name` and `spec`. Its `kind` MUST be a declared kind. The server MUST NOT store or send any other.
 - **DECL-8.** A declaration's object MUST NOT carry a secret value. A secret is named only as `<secret-name>/<key>`, in the object's own namespace. The secret's name is a DNS-1123 subdomain, and the key matches `[-._a-zA-Z0-9]+` and is neither `.` nor `..`.
 - **DECL-9.** A declaration's object MUST NOT name a container image. Images are the cluster's configuration.
 - **DECL-10.** Applying is idempotent by `(id, generation)`. The client MUST NOT apply a generation lower than the one it has applied for that identifier, and MAY skip one it has already applied.
-- **DECL-11.** The client applies an `apply` change as an object owned by `garam`, carrying the declaration's identifier and generation. It MUST NOT apply one whose namespace and name a cluster-owned object holds, and reports it as `conflict` instead.
+- **DECL-11.** The client applies an `apply` change as an object owned by `garam`, whose marker carries its own record's GRN and the declaration's identifier and generation. It MUST NOT apply one whose namespace and name are held by any object other than its own garam-owned object for that identifier. That covers a cluster-owned object and a garam-owned object of another record. It reports the change as `conflict` instead.
 - **DECL-12.** The client MUST NOT apply a change that breaks DECL-7, DECL-8 or DECL-9, and reports it as `invalid`. It also reports a change for a namespace it does not watch as `namespaceNotWatched`.
 - **DECL-13.** The client deletes a garam-owned object only on a `delete` change for its identifier. It MUST NOT delete an object because a full set does not name it. It reports such an object as `orphaned` instead.
-- **DECL-14.** The client MUST NOT change or delete a cluster-owned object on any change.
+- **DECL-14.** The client MUST NOT change or delete a cluster-owned object, or a garam-owned object of another record, on any change.
 - **DECL-15.** A client configured to report only applies nothing and deletes nothing, and still reports.
+
+## Namespace claims
+
+- **CLAIM-1.** A client acts in a watched namespace only while it holds that namespace's claim: a `coordination.k8s.io` Lease named `garam-connector-claim` in the namespace, whose holder identity is the client's cluster record GRN. A client creates the claim where none exists, and renews it.
+- **CLAIM-2.** A client MUST NOT apply, delete or report anything in a namespace whose claim names another record. It reports that namespace as `claimedElsewhere` and goes on in the others. So two releases, whether of two organizations or of one, never act in the same namespace.
 
 ## Reports
 
@@ -90,14 +101,17 @@ The key words MUST, MUST NOT, SHOULD and MAY are used as RFC 2119 defines them. 
 
 - **REP-1.** A report is the client's whole view, never a delta. It carries:
   - `observedAt`;
-  - `connector`, with its `version`, its `mode` (`apply` or `reportOnly`) and the `namespaces` it watches;
+  - `connector`, with its `version`, its `mode` (`apply` or `reportOnly`), the `namespaces` it holds claims on, and the namespaces it found `claimedElsewhere`;
   - `declarations`, the outcome of each identifier the client last received: `applied`, `conflict`, `invalid` or `namespaceNotWatched`, with the generation and a message;
-  - `objects`, every object of a declared kind in the watched namespaces.
+  - `objects`, every own object (see Terms) of a declared kind in the namespaces it holds claims on.
 - **REP-2.** Each object carries `apiVersion`, `kind`, `namespace`, `name`, `uid`, `owner`, `generation` and `status`. A garam-owned object also carries its `declarationId` and `orphaned`. A cluster-owned object also carries its `spec`.
 - **REP-3.** A report MUST NOT carry a Secret, a ConfigMap, or any object of a kind that is not declared. A secret is named only as DECL-8 names it.
 - **REP-4.** The client MUST send a report within 10 seconds of a change it observed, and at least every 5 minutes.
 - **REP-5.** The server answers 204. It keeps only the report with the latest `observedAt` and ignores an older one. It records the time of every authenticated request as the record's `lastContactAt`.
 - **REP-6.** A body over 4 MiB MAY be answered 413 `report_too_large`. The client then reports the error and goes on applying declarations.
+- **REP-7.** A report is untrusted input. The server MUST refuse, with 400 `invalid_request`, a report carrying an object of a kind that is not declared, or a Secret or ConfigMap.
+- **REP-8.** The server MUST ignore an outcome or an object that names a declaration identifier not placed on the reporting record. It records nothing of either.
+- **REP-9.** The server MUST treat a cluster-owned object's `spec` and every `status` and `message` as display data. It never acts on them as a declaration, and it renders them only as text.
 
 ## Compatibility
 

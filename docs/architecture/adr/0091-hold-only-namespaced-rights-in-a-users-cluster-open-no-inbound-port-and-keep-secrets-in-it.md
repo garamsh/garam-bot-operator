@@ -23,19 +23,24 @@ The 11-21 decisions (`garamsh/discussions` discussion 6, comments 19791278 and 1
    - The release namespace always holds the leader-election Lease, the cluster key's Secret and the two programs' own objects.
    - The watched namespaces are a chart value, defaulting to the release namespace alone. The chart renders a Role and a RoleBinding in each one for each program.
    - Both programs restrict their caches to those namespaces, so neither lists or watches anything cluster-wide.
+   - Both act only in a watched namespace whose claim (ADR 0089 decision 8) names their release: the cluster record, or, with the connector off, the release itself. Two releases watching one namespace therefore leave it to whichever claimed it first.
 
 2. **Each program holds only the verbs its own work calls.**
 
    | Program | Rights |
    |---|---|
-   | Manager | The workload objects it builds, in watched namespaces: StatefulSets, claims, Pods and events. Reading the Secrets an object references. Writing interface-1 objects' status. |
-   | Connector | Writing interface-1 objects, in watched namespaces. Creating and patching the bot credential Secrets it writes. Reading and writing its own key Secret, by name, in the release namespace. |
+   | Manager | The workload objects it builds, in watched namespaces: StatefulSets, claims, Pods and events. Listing and watching Secrets there, to learn whether a referenced one exists. Writing interface-1 objects' status. The claim Lease in each. |
+   | Connector | Writing interface-1 objects, in watched namespaces. Creating Secrets there, and getting and patching them, for the bot credential Secrets it writes. Reading and writing its own key Secret, by name, in the release namespace. The claim Lease in each. |
+
+   RBAC cannot narrow either further. A Role grants `list` and `watch` on every Secret of its namespace or on none. `resourceNames` cannot bound `create`, and cannot name a bot's credential Secret before the bot exists. So in a watched namespace each program can read every Secret. A watched namespace is one that holds the bots' objects and the Secrets they reference, and nothing else the user would not hand to these two programs. The chart's documentation says so.
 
 3. **CRDs are installed by Helm, with the installer's rights, and are the only cluster-scoped objects the chart renders.** A user whose cluster already holds them installs with `--skip-crds`. Nothing at runtime creates or changes a CRD.
 
 4. **The chart opens no inbound path.**
    - It renders no Service of type LoadBalancer or NodePort, no Ingress and no Gateway route, and no admission webhook.
-   - Each program's Pod is selected by a NetworkPolicy that admits no ingress. Egress is limited to garam's address on 443, the Kubernetes API and cluster DNS.
+   - Each program's Pod is selected by a NetworkPolicy that admits no ingress.
+   - The connector's egress goes to the configured forward proxy where one is set, and otherwise to garam's address on 443, plus cluster DNS.
+   - Egress to the Kubernetes API is the address range the user gives as a chart value. Where that address lies is the distribution's, and no portable selector names it.
    - Metrics are off by default. When turned on they are plain HTTP inside the cluster, admitted by a NetworkPolicy rule the user names, because the authenticated metrics filter needs the ClusterRole decision 1 refuses.
 
 5. **Secrets stay in the cluster.**
@@ -50,7 +55,8 @@ The 11-21 decisions (`garamsh/discussions` discussion 6, comments 19791278 and 1
 
 ## Consequences
 
-- garam's blast radius in a user's cluster is the declared kinds, in the namespaces the user listed, run with the images the user installed. It cannot exec into Pods, read Secrets or reach the API on its own.
+- garam's blast radius in a user's cluster is the declared kinds, in the namespaces the user listed, run with the images the user installed. Through the protocol, garam cannot exec into Pods, read Secrets or reach the API: the connector sends no Secret and acts only on declared kinds.
+- Someone running code inside the connector's or the manager's Pod can read the Secrets of the watched namespaces, by the rights above. That is why a watched namespace holds nothing else.
 - Watching a new namespace is a chart upgrade, so it is a change the cluster's administrator makes.
 - A cluster without NetworkPolicy enforcement keeps every other guarantee here. The NetworkPolicy is a second layer, and the chart's documentation says so.
 - Sealed static keys are not built in this goal. Building them later adds a sealing key that only decrypts and never signs, a key separate from the one in ADR 0088.

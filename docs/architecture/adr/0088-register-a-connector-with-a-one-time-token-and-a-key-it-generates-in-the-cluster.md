@@ -26,7 +26,7 @@ Precedents for the same shape:
 
 1. **A cluster is a garam resource of its own, `grn:<org>/iam/cluster/<id>`, in one organization.** It sits under `iam` because garam's catalogue places every machine identity there, `operator`, `supervisor` and, by garam ADR-0179, `bot` (`docs/architecture/grn-model.md` §Types by owning service). The record is the connector's machine identity, and it is the target that declarations are placed on (ADR 0089). It is not an Operator record: the Operator record carries hosted-operator delegation, grants and a control endpoint, and none of those applies to a connected cluster.
 
-2. **One chart release is one cluster record in one organization.** A second organization connecting the same physical cluster installs a second release, in another namespace, and registers a second record. A release never serves two organizations. This follows the 11-21 decision that organizations are not mixed.
+2. **One chart release is one cluster record in one organization.** A second organization connecting the same physical cluster installs a second release, in another namespace, and registers a second record. A release never serves two organizations. This follows the 11-21 decision that organizations are not mixed. Two releases never act in the same namespace: each holds a claim on each namespace it watches, and stays out of one another release has claimed (ADR 0089).
 
 3. **Registration is one call that spends a one-time token.**
    - A member with `iam:cluster.register` creates the record from the dashboard, and garam answers a registration token once.
@@ -39,7 +39,12 @@ Precedents for the same shape:
 
 5. **After registration, the connector authenticates as garam's other machine callers do.** It exchanges a `private_key_jwt` assertion for a one-hour token under `machine-token.v2`, and presents the token on every call. `internal/machinetoken` already implements that client (ADR 0072).
 
-6. **The connector rotates its own key, and signs the rotation with the current one.** It generates a successor and sends its public JWK on a call authenticated by its current token, together with a proof that it holds the successor: an assertion the successor signed. garam holds the two keys live for its existing 24-hour rollover, after which the predecessor is withdrawn. A third live key is refused. The connector rotates every 30 days, and on a person's request through the chart.
+6. **The connector rotates its own key, and signs the rotation with the current one.** It generates a successor and sends its public JWK on a call that carries three things:
+   - the current token;
+   - an authorization the current key signed, naming the successor's thumbprint;
+   - a proof the successor signed.
+
+   The bearer token alone rotates nothing, so a token that leaks, through a TLS-inspecting proxy or a log, cannot install another key. garam holds the two keys live for its existing 24-hour rollover, after which the predecessor is withdrawn, and a third live key is refused. Repeating a rotation whose answer was lost answers as the first did. A connector that got no answer, or a 409, tries its stored successor at the exchange before anything else. The connector rotates every 30 days, and on a person's request through the chart. The wire is ROT-1 to ROT-5.
 
 7. **Revocation is garam's and takes effect on the next request.** An administrator withdraws a key or deletes the cluster record. garam reads both on every request, as it does for an operator. A cluster that lost its key is registered again with a new token, under the same record (`iam:cluster.reissue`). That withdraws every key the record held.
 
@@ -51,7 +56,7 @@ Precedents for the same shape:
    | A registration token's hash and expiry | The token is spent or expires |
    | Each public JWK with its RFC 7638 thumbprint and state (active, retiring, revoked) | The record is deleted |
    | Token hashes, as for an operator | The token expires or its key is withdrawn |
-   | Declarations and their tombstones (ADR 0089) | Tombstones are kept 30 days |
+   | Declarations and their tombstones (ADR 0089), and how far tombstones have been purged | Tombstones are kept at least 30 days |
    | The latest report: the cluster's objects of the declared kinds, the watched namespaces, the connector's version, `lastContactAt` | Replaced by the next report |
 
 9. **The IAM actions are named the way garam names the operator's.** `iam:cluster.register`, `iam:cluster.read`, `iam:cluster.update` (name and description), `iam:cluster.reissue` and `iam:cluster.delete`. Which roles hold each is garam's to decide.

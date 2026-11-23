@@ -162,9 +162,10 @@ components:
         tokenUrl: { type: string, format: uri }
     KeyRotationRequest:
       type: object
-      required: [jwk, proof]
+      required: [jwk, authorization, proof]
       properties:
         jwk: { $ref: "#/components/schemas/PublicJwk" }
+        authorization: { type: string, description: "Compact JWS, typ key-rotation+jwt, signed by a live key of the record, its jkt the successor's thumbprint (ROT-1)." }
         proof: { type: string, description: "Compact JWS, typ key-proof+jwt, signed by the successor (ROT-1)." }
     KeyRotation:
       type: object
@@ -227,6 +228,7 @@ components:
         uid: { type: string }
         owner: { enum: [garam, cluster] }
         generation: { type: integer, minimum: 1 }
+        cluster: { $ref: "#/components/schemas/Grn", description: "garam-owned objects only: the record its marker names, always the reporting record (REP-1)." }
         declarationId: { type: string, description: garam-owned objects only. }
         orphaned: { type: boolean, description: garam-owned objects only (DECL-13). }
         spec: { type: object, description: cluster-owned objects only. }
@@ -244,7 +246,11 @@ components:
             mode: { enum: [apply, reportOnly] }
             namespaces:
               type: array
-              minItems: 1
+              description: The namespaces whose claim the client holds (CLAIM-1).
+              items: { type: string }
+            claimedElsewhere:
+              type: array
+              description: Watched namespaces whose claim names another record (CLAIM-2).
               items: { type: string }
         declarations:
           type: array

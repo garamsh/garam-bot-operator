@@ -20,25 +20,27 @@ Precedent: argocd-agent has two agent modes. In managed mode "the control plane 
 
 ## Decision
 
-1. **Every object of a declared kind has exactly one owner, `garam` or the cluster**, recorded by interface 1's managed-by marker. An object the connector creates from a garam declaration carries `garam` and the declaration's identifier. Every other object, whether written with `kubectl`, applied from a file or created by GitOps, is the cluster's.
+1. **Every object of a declared kind has exactly one owner, `garam` or the cluster**, recorded by interface 1's managed-by marker. An object the connector creates from a garam declaration carries three things: `garam`, the cluster record that applied it, by GRN, and the declaration's identifier and generation. Every other object, whether written with `kubectl`, applied from a file or created by GitOps, is the cluster's. A garam-owned object of another record is neither the cluster's nor this connector's. The connector does not apply over it, delete it or report it.
 
 2. **garam's declarations flow to the cluster.** The connector long-polls garam (ADR 0087) for changes to the declarations placed on its cluster, and applies each one by server-side apply under one field manager. It reverts drift in a garam-owned object: a hand edit is undone at the next apply, which happens on every change and at least every 10 minutes.
 
-3. **Cluster-owned objects flow to garam as reports, and garam does not write them.** The connector reports every object of the declared kinds in its watched namespaces: owner, identity, generation, spec and status. It also reports the outcome of each garam declaration. garam shows a cluster-owned object read-only, with the cluster as its source.
+3. **Cluster-owned objects flow to garam as reports, and garam does not write them.** The connector reports every object of the declared kinds in the namespaces it has claimed (decision 8): owner, identity, generation, spec and status. It also reports the outcome of each garam declaration. garam shows a cluster-owned object read-only, with the cluster as its source.
 
 4. **The owner of an object is the only side that changes it, and a collision is refused, never resolved by overwriting.**
-   - A garam declaration whose namespace and name are held by a cluster-owned object is not applied. The connector reports it as `conflict`, and the cluster-owned object stays as it is.
+   - A garam declaration whose namespace and name are held by a cluster-owned object, or by a garam-owned object of another record, is not applied. The connector reports it as `conflict`, and the object holding the name stays as it is.
    - garam refuses a declaration whose namespace and name its latest report shows held by a cluster-owned object. That refusal is a courtesy, since the report may be stale. The connector's refusal is what holds.
    - Changing an object's owner is not part of this goal. It is an explicit adopt or release action, recorded as an open question in `connector.md`.
 
 5. **A deletion is explicit, never inferred from absence.**
    - garam deletes a garam-owned object by sending a tombstone for its declaration. garam keeps tombstones for 30 days.
-   - A connector whose cursor is older than that is answered `cursor_expired` and reads the full set again. A garam-owned object that the full set does not name is reported as `orphaned` and left in place. garam can then send a tombstone for it.
+   - garam records how far it has purged tombstones. A connector whose cursor lies at or before that point is answered `cursor_expired`, whether or not any tombstone remains, and reads the full set again. A garam-owned object that the full set does not name is reported as `orphaned` and left in place. garam can then send a tombstone for it.
    - A cluster-owned object deleted in the cluster disappears from the next report. garam deletes nothing in the cluster for it.
 
 6. **Losing garam changes nothing in the cluster.** While the connection is down, the connector applies nothing new and deletes nothing. The in-cluster reconciler goes on running every object, whoever owns it.
 
 7. **A declaration carries no secret value and names no container image.** A secret appears only as a reference, `<secret-name>/<key>`, to a Secret in the object's namespace, in the form `internal/secretref` states. Which images run is the chart's configuration. The connector refuses a declaration that carries anything else in those places, and reports it as `invalid` (ADR 0091).
+
+8. **A connector acts only in namespaces it has claimed.** Each watched namespace holds one claim, a Lease naming the cluster record. A connector creates the claim where none exists and stays out of a namespace whose claim names another record, reporting it as `claimedElsewhere`. So two releases on one cluster, of two organizations or of one, never overwrite each other's objects, and never report each other's (CLAIM-1, CLAIM-2).
 
 ## Consequences
 
