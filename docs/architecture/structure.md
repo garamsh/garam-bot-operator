@@ -44,6 +44,13 @@ Partitioning the operator by domain is a change of its own, which no pull reques
 - **`internal/secretref` states and parses a Secret key reference, `<secret-name>/<key>`, for both binaries** (#248). The control service's `internal/definition` and the manager's `internal/desired/renderer` both parse with it, and neither restates the rule. It imports no domain.
 - **`internal/machinetoken` obtains an operator's garam token under its own key and presents it, for both binaries** ([ADR 0072](adr/0072-authenticate-the-manager-and-the-control-service-to-garam-with-their-own-private-keys.md)). The manager's composition site hands it to `internal/garam`'s and `internal/desired`'s clients, and the control service's to `internal/garammachine`'s; `internal/garam` also reads its failure type to count it. It imports no domain.
 
+### Interface specifications
+
+- **`interfaces/<name>/<version>/` holds the specification of a boundary between separately built components, and is no domain** ([ADR 0092](adr/0092-specify-the-garam-connector-boundary-as-the-cluster-connection-interface-with-conformance-suites.md)). `interfaces/cluster-connection/v1alpha1/` is the first: garam to the connector.
+  - **What it holds:** the normative specification, its schemas and its conformance test list. The conformance suites and the reference server will be built under it too.
+  - **What it imports:** no domain of either binary, because another repository's implementation runs its suites.
+- **The connector will be a third binary, `cmd/connector`, with its own composition site** ([ADR 0090](adr/0090-run-the-connector-as-a-binary-beside-the-manager-and-build-the-bot-reconciler-from-the-agent-workload.md)). It follows `stack-go.md` alone. It shares no domain with the manager or the control service, and may reach `internal/machinetoken` and `internal/secretref`, which sit below every binary. It is unbuilt.
+
 ### A new domain
 
 - **A new domain is earned** by subject matter that has its own lifecycle and vocabulary, that something outside it depends on, and whose public surface can stay stable while its inside changes. Code that fails any of the three belongs in an existing domain.

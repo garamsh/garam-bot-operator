@@ -38,6 +38,7 @@ Before a delta between this file and the template is called stale, read it again
 |---|---|
 | `agent.md` | The `agent.garam.sh` API group, the `Agent` kind, and its controller |
 | `configuration.md` | How this project's binaries are configured, and which repository owns each value |
+| `connector.md` | How a user's own cluster connects to garam: the connector chart and its two programs, registration and identity, declarations synced both ways, rights in the cluster, and what garam owes |
 | `control.md` | The control service: definitions and revisions, templates, profiles, creation and configure requests, recoveries and stops, what each controller reports of itself, their store, the console API that changes and reads them, and the controller API that releases them |
 | `gaon-operator.md` | The operator that runs each managed agent as one MicroVM on a gaon cluster, imported from garam, discontinued and not released (ADR 0086): its reconciler, wire clients, guest image, and what is not built |
 | `delivery.md` | The images this project publishes, the reference a deployment uses, and where its output lands in a cluster |
@@ -126,7 +127,7 @@ Before a delta between this file and the template is called stale, read it again
 | `adr/0076-create-a-managed-agent-through-garams-agent-enrollment-v1-prepared-then-admitted.md` | Create a managed agent through garam's agent-enrollment.v1, prepared then admitted | accepted; its operation names superseded by ADR-0080 |
 | `adr/0077-build-agents-only-from-the-control-services-feed-and-remove-the-legacy-path-and-the-cut-over.md` | Build agents only from the control service's feed, and remove the legacy path and the cut-over | accepted |
 | `adr/0078-publish-each-image-to-one-repository-and-tell-release-from-development-by-tag.md` | Publish each image to one repository, and tell release from development by tag | accepted; the release version form superseded by ADR-0081 |
-| `adr/0079-run-only-on-our-own-system-and-keep-the-seams-that-allow-a-bring-your-own-operator.md` | Run only on our own system, and keep the seams that allow a bring-your-own operator | accepted |
+| `adr/0079-run-only-on-our-own-system-and-keep-the-seams-that-allow-a-bring-your-own-operator.md` | Run only on our own system, and keep the seams that allow a bring-your-own operator | accepted; decisions 1 and 2 superseded in part, for the connector chart, by ADR-0087 |
 | `adr/0080-name-garams-resources-and-operations-as-garam-v0-7-0-does.md` | Name garam's resources and operations as garam `v0.7.0` does | accepted |
 | `adr/0081-release-as-0-1-0-dev-n-and-0-1-0-rc-n-until-launch-and-0-1-0-at-launch.md` | Release as `0.1.0-dev.N` and `0.1.0-rc.N` until launch, and `0.1.0` at launch | accepted |
 | `adr/0082-import-garams-gaon-operator-and-keep-it-in-this-repository.md` | Import garam's gaon operator and keep it in this repository | accepted; the gaon operator discontinued and not released by ADR-0086 |
@@ -134,6 +135,12 @@ Before a delta between this file and the template is called stale, read it again
 | `adr/0084-publish-the-gaon-operator-and-the-guest-image-from-the-release-workflow.md` | Publish the gaon operator and the guest image from the release workflow | superseded by ADR-0086 |
 | `adr/0085-ship-a-helm-chart-of-gaon-kinds-for-the-control-service-and-the-gaon-operator.md` | Ship a Helm chart of gaon kinds for the control service and the gaon operator | accepted; the gaon operator it deploys discontinued and not released by ADR-0086 |
 | `adr/0086-restore-the-kubernetes-operator-and-keep-the-gaon-operator-unreleased.md` | Restore the Kubernetes operator and keep the gaon operator unreleased | accepted |
+| `adr/0087-connect-a-users-cluster-through-a-connector-it-installs-that-dials-garam-over-https-long-poll.md` | Connect a user's cluster to garam through a connector it installs, which dials garam over HTTPS long-poll | accepted |
+| `adr/0088-register-a-connector-with-a-one-time-token-and-a-key-it-generates-in-the-cluster.md` | Register a connector with a one-time token and a key it generates in the cluster, and authenticate as a cluster garam records | accepted |
+| `adr/0089-sync-declarations-both-ways-and-give-each-object-one-owner.md` | Sync declarations both ways between garam and a connected cluster, and give each object one owner | accepted |
+| `adr/0090-run-the-connector-as-a-binary-beside-the-manager-and-build-the-bot-reconciler-from-the-agent-workload.md` | Run the connector as its own binary beside the manager, and build the Bot reconciler from the Agent workload code | accepted |
+| `adr/0091-hold-only-namespaced-rights-in-a-users-cluster-open-no-inbound-port-and-keep-secrets-in-it.md` | Hold only namespaced rights in a user's cluster, open no inbound port, and keep secrets in the cluster | accepted |
+| `adr/0092-specify-the-garam-connector-boundary-as-the-cluster-connection-interface-with-conformance-suites.md` | Specify the garam-to-connector boundary as the cluster-connection interface, with conformance suites and a reference server | accepted |
 
 ### Templates
 

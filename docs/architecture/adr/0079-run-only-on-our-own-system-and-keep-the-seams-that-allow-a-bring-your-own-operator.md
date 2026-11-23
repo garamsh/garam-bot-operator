@@ -1,6 +1,6 @@
 # ADR 0079: Run only on our own system, and keep the seams that allow a bring-your-own operator
 
-> Status: accepted
+> Status: accepted; decisions 1 and 2 superseded in part, for the connector chart, by ADR-0087
 > Date: 2026-10-30
 
 Append-only: once merged, the body below is not rewritten. A fact later found wrong is corrected in an appended note, not edited out; a revised decision is a new ADR that supersedes this one.
