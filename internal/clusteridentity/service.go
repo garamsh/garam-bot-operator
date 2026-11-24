@@ -14,8 +14,9 @@ import (
 const (
 	// keyBits is the size of every key generated here (ADR 0088 decision 3).
 	keyBits = 3072
-	// rotationPeriod is how long a key signs before the connector rotates it (ADR 0088 decision 6).
-	rotationPeriod = 30 * 24 * time.Hour
+	// defaultRotationPeriod is how long a key signs before the connector rotates it, unless configured
+	// otherwise (ADR 0094).
+	defaultRotationPeriod = 30 * 24 * time.Hour
 	// defaultTokenPoll is how often a connector waiting for a new registration token reads the file again.
 	defaultTokenPoll = 10 * time.Second
 	// defaultRequestTimeout bounds each registration and rotation request, the exchanges it carries included.
@@ -34,8 +35,10 @@ type Config struct {
 	Version string
 	Store   KeyStore
 	Log     *slog.Logger
-	// Now, Random, Sleep, GenerateKey, TokenPoll and RequestTimeout default to the clock, crypto/rand, a
-	// timer, an RSA 3072 key from crypto/rand, 10 seconds and 30 seconds.
+	// RotationPeriod is how long a key signs before it is rotated (ADR 0094).
+	RotationPeriod time.Duration
+	// Now, Random, Sleep, GenerateKey, TokenPoll, RequestTimeout and RotationPeriod default to the clock,
+	// crypto/rand, a timer, an RSA 3072 key from crypto/rand, 10 seconds, 30 seconds and 30 days.
 	Now            func() time.Time
 	Random         io.Reader
 	Sleep          func(ctx context.Context, d time.Duration) error
@@ -73,6 +76,9 @@ type service struct {
 func NewService(cfg Config) Service {
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
+	}
+	if cfg.RotationPeriod <= 0 {
+		cfg.RotationPeriod = defaultRotationPeriod
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

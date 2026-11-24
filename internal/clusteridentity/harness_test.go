@@ -134,9 +134,11 @@ type harness struct {
 	sleeps    []time.Duration
 	// onSleep, where set, runs at each Sleep, and its error ends the wait with it.
 	onSleep func(n int, d time.Duration) error
-	// random and requestTimeout, where set, are the Service's Random and RequestTimeout.
+	// random, requestTimeout and rotationPeriod, where set, are the Service's Random, RequestTimeout and
+	// RotationPeriod.
 	random         io.Reader
 	requestTimeout time.Duration
+	rotationPeriod time.Duration
 }
 
 func newHarness(t *testing.T) *harness {
@@ -189,6 +191,7 @@ func (h *harness) service() clusteridentity.Service {
 		Now:            h.clock.Now,
 		Random:         h.random,
 		RequestTimeout: h.requestTimeout,
+		RotationPeriod: h.rotationPeriod,
 		Sleep: func(ctx context.Context, d time.Duration) error {
 			h.mu.Lock()
 			h.sleeps = append(h.sleeps, d)

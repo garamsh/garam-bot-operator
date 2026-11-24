@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -8,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -120,4 +122,22 @@ func TestGaramClient_KeepsTheEnvironmentsProxy(t *testing.T) {
 func TestWatchedNamespaces_ReadsEachNameOnceWithoutBlanks(t *testing.T) {
 	assert.Equal(t, []string{"bots", "more-bots"}, watchedNamespaces(" bots, ,more-bots,bots,"))
 	assert.Empty(t, watchedNamespaces(" , "), "no name at all leaves the required flag unset")
+}
+
+func TestRun_RefusesARotationPeriodOfZeroOrLess(t *testing.T) {
+	configured := func(period time.Duration) options {
+		return options{garamURL: "https://garam.example", rootFile: filepath.Join(t.TempDir(), "absent.pem"),
+			tokenFile: "token", releaseNamespace: "garam", releaseName: "connector", watchNamespaces: "bots",
+			rotationPeriod: period}
+	}
+	log := slog.New(slog.DiscardHandler)
+	for _, period := range []time.Duration{0, -time.Hour} {
+		err := run(context.Background(), configured(period), log)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--rotation-period", "ADR 0094: %v is refused", period)
+	}
+	err := run(context.Background(), configured(time.Hour), log)
+	require.Error(t, err, "control: the absent root file still stops it")
+	assert.NotContains(t, err.Error(), "--rotation-period", "control: a period over 0 is taken")
 }

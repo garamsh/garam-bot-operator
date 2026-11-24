@@ -177,7 +177,7 @@ func (c *connection) Run(ctx context.Context) error {
 		state, _ := c.current()
 		// A successor stored is a rotation a restart, or an earlier one here, left unresolved: it is
 		// resolved now, not at the next due date.
-		if wait := state.KeySince.Add(rotationPeriod).Sub(c.s.cfg.Now()); wait > 0 && state.Successor == nil {
+		if wait := state.KeySince.Add(c.s.cfg.RotationPeriod).Sub(c.s.cfg.Now()); wait > 0 && state.Successor == nil {
 			if err := c.s.cfg.Sleep(ctx, wait); err != nil {
 				return err
 			}

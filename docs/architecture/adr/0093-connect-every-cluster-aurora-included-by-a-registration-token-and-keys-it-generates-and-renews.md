@@ -1,6 +1,6 @@
 # ADR 0093: Connect every cluster, aurora included, by a registration token given once and keys it generates and renews itself
 
-> Status: accepted
+> Status: accepted; the rotation period of decision 3 superseded by ADR-0094
 > Date: 2026-11-24
 
 Append-only: once merged, the body below is not rewritten. A fact later found wrong is corrected in an appended note, not edited out; a revised decision is a new ADR that supersedes this one.
