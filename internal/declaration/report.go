@@ -22,7 +22,13 @@ const (
 	// modeApply and modeReportOnly are a report's connector.mode.
 	modeApply      = "apply"
 	modeReportOnly = "reportOnly"
+	// largestReport is REP-6's largest body garam need take.
+	largestReport = 4 << 20
 )
+
+// errReportTooLarge is a report over largestReport: garam answered 413, or the connector found it too
+// large before sending it (REP-6).
+var errReportTooLarge = errors.New("the report is over 4 MiB")
 
 // report and its members are Report of openapi.yaml (REP-1, REP-2).
 type report struct {
@@ -62,49 +68,71 @@ type reportedObject struct {
 }
 
 // reports sends the last pass's whole view within moments of each pass that found it changed, and at
-// least every 5 minutes (REP-1, REP-4). A report garam did not take is sent again after T-6's wait.
+// least every 5 minutes (REP-1, REP-4). A report garam did not take is sent again no sooner than T-6
+// allows. A pass that ends before then is held until then, and the latest view is the one sent.
 func (s *service) reports(ctx context.Context) error {
 	var sent *Status
-	var due time.Time
+	due := s.cfg.Now().Add(reportEvery)
+	var notBefore time.Time
 	wait := firstBackoff
-	var retry <-chan time.Time
+	held := false
 	for {
-		periodic := s.cfg.After(reportEvery)
-		if !due.IsZero() {
-			periodic = s.cfg.After(max(due.Sub(s.cfg.Now()), 0))
+		next := due
+		if held {
+			next = notBefore
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-s.reported:
-		case <-periodic:
-			sent = nil
-		case <-retry:
+		case <-s.passDone:
+			held = true
+			if s.cfg.Now().Before(notBefore) {
+				continue
+			}
+		case <-s.cfg.After(max(next.Sub(s.cfg.Now()), 0)):
 		}
-		retry = nil
+		now := s.cfg.Now()
+		if !now.Before(due) {
+			sent = nil
+		}
 		status, ok := s.Status()
 		if !ok || (sent != nil && sameView(*sent, status)) {
+			held = false
 			continue
 		}
 		err := s.send(ctx, status)
 		var refused *unanswered
 		switch {
-		case err == nil, errors.As(err, &refused) && refused.status == http.StatusRequestEntityTooLarge:
+		case err == nil, errors.Is(err, errReportTooLarge):
 			if err != nil {
 				// REP-6: reported, and declarations go on being applied. The next change is reported again.
-				s.cfg.Log.Error("garam refused the report as too large", "objects", len(status.Objects))
+				s.cfg.Log.Error("the report is too large for garam; it is sent again when the view changes",
+					"error", err, "objects", len(status.Objects))
 			}
-			sent, due, wait = &status, s.cfg.Now().Add(reportEvery), firstBackoff
+			sent, due, notBefore, wait, held = &status, now.Add(reportEvery), time.Time{}, firstBackoff, false
+			continue
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case errors.As(err, &refused) && refused.status == http.StatusTooManyRequests:
-			retry = s.cfg.After(refused.retryAfter)
+			notBefore = now.Add(refused.retryAfter)
 		default:
-			s.cfg.Log.Warn("the report was not taken; sending it again", "error", err, "wait", wait)
-			retry = s.cfg.After(wait)
+			s.notTaken(err, wait)
+			notBefore = now.Add(wait)
 			wait = min(2*wait, lastBackoff)
 		}
+		held = true
 	}
+}
+
+// notTaken logs a report garam did not take: at Error where the answer says the report itself is wrong,
+// since sending it again cannot help, and at Warn where garam or the network may yet take it.
+func (s *service) notTaken(err error, wait time.Duration) {
+	var refused *unanswered
+	if errors.As(err, &refused) && refused.status >= 400 && refused.status < 500 {
+		s.cfg.Log.Error("garam refused the report; sending it again", "error", err, "wait", wait)
+		return
+	}
+	s.cfg.Log.Warn("the report was not taken; sending it again", "error", err, "wait", wait)
 }
 
 // sameView is whether two passes found the same view, whenever each observed it.
@@ -121,6 +149,9 @@ func (s *service) send(ctx context.Context, status Status) error {
 	if err != nil {
 		return fmt.Errorf("encode the report: %w", err)
 	}
+	if len(body) > largestReport {
+		return fmt.Errorf("%w: %d bytes encoded, not sent", errReportTooLarge, len(body))
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.BaseURL+reportsPath, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build the report request: %w", err)
@@ -134,6 +165,8 @@ func (s *service) send(ctx context.Context, status Status) error {
 	switch response.StatusCode {
 	case http.StatusNoContent:
 		return nil
+	case http.StatusRequestEntityTooLarge:
+		return fmt.Errorf("%w: garam answered 413", errReportTooLarge)
 	case http.StatusTooManyRequests:
 		return &unanswered{status: response.StatusCode, retryAfter: retryAfter(response.Header.Get("Retry-After"))}
 	}

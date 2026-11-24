@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
 	"github.com/garamsh/garam-agent-operator/interfaces/cluster-connection/v1alpha1/reference"
@@ -67,10 +68,15 @@ func TestReports_CarryNoSecretOrConfigMapWhateverTheNamespaceHolds(t *testing.T)
 	require.NoError(t, k8sClient.Create(ctx, &coordinationv1.Lease{
 		Namespace: ns, Name: declaration.ClaimName, Spec: coordinationv1.LeaseSpec{HolderIdentity: ptr.To(holder)},
 	}))
-	require.NoError(t, k8sClient.Create(ctx, &botv1.Bot{Namespace: ns, Name: "made-here", Spec: botv1.BotSpec{
+	made := &botv1.Bot{Namespace: ns, Name: "made-here", Spec: botv1.BotSpec{
 		Persona: botv1.Persona{Role: "reviewer"}, Agent: botv1.Agent{Harness: "claude-code"},
 		Permissions: botv1.Permissions{Secrets: []botv1.SecretKeyRef{"creds/token"}},
-	}}))
+	}}
+	require.NoError(t, k8sClient.Create(ctx, made))
+	const statusMessage = "status-written-through-the-subresource"
+	made.Status = botv1.BotStatus{ObservedGeneration: 1, Conditions: []metav1.Condition{{Type: "Ready",
+		Status: metav1.ConditionTrue, Reason: "Tested", Message: statusMessage, LastTransitionTime: metav1.Now()}}}
+	require.NoError(t, k8sClient.Status().Update(ctx, made))
 
 	var mu sync.Mutex
 	var reports [][]byte
@@ -107,8 +113,8 @@ func TestReports_CarryNoSecretOrConfigMapWhateverTheNamespaceHolds(t *testing.T)
 			return false
 		}
 		last = reports[len(reports)-1]
-		return bytes.Contains(last, []byte(`"made-here"`))
-	}, eventually, tick, "a report carrying the cluster-owned Bot")
+		return bytes.Contains(last, []byte(`"made-here"`)) && bytes.Contains(last, []byte(statusMessage))
+	}, eventually, tick, "REP-2: a report carrying the cluster-owned Bot with its status")
 
 	var report struct {
 		Objects []struct {

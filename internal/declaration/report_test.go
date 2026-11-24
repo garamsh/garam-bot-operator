@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,7 +74,9 @@ func pacedReports(cfg declaration.Config) (declaration.Config, chan time.Time) {
 func TestRun_ReportsTheWholeViewOfTheClaimedNamespaces(t *testing.T) {
 	h := newHarness(t)
 	h.objects.unclaim(other)
-	h.objects.put(object(watched, "cluster-made", map[string]string{team: "a"}))
+	made := object(watched, "cluster-made", map[string]string{team: "a"})
+	made.Object["status"] = map[string]any{"observedGeneration": int64(1), "phase": "Running"}
+	h.objects.put(made)
 	h.objects.put(garamOwned(watched, "gone", h.record, "pool-gone", 2))
 	h.objects.put(garamOwned(watched, "theirs", "grn:acme/iam/cluster/another", "pool-x", 1))
 	h.objects.put(object(watched, "malformed", map[string]string{botv1.LabelManagedBy: string(botv1.OwnerGaram)}))
@@ -95,16 +100,23 @@ func TestRun_ReportsTheWholeViewOfTheClaimedNamespaces(t *testing.T) {
 	assert.Equal(t, poolA, applied["declarationId"])
 	assert.Equal(t, false, applied["orphaned"])
 	assert.NotContains(t, applied, "spec", "REP-2: a garam-owned object carries no spec")
-	assert.Equal(t, map[string]any{}, applied["status"])
+	assert.Equal(t, map[string]any{}, applied["status"], "an object with no status reports an empty one")
 	for _, member := range []string{"apiVersion", "kind", "namespace", "uid", "generation"} {
 		assert.NotEmpty(t, applied[member], member)
 	}
 	assert.Equal(t, true, objects["gone"]["orphaned"], "DECL-13")
-	made := objects["cluster-made"]
-	assert.Equal(t, "cluster", made["owner"])
-	assert.Equal(t, map[string]any{maxField: float64(1)}, made["spec"], "REP-2: a cluster-owned object carries its spec")
-	assert.NotContains(t, made, "declarationId")
-	assert.NotContains(t, made, "orphaned")
+	reportedMade := objects["cluster-made"]
+	assert.Equal(t, "cluster", reportedMade["owner"])
+	assert.Equal(t, map[string]any{maxField: float64(1)}, reportedMade["spec"], "REP-2: a cluster-owned object carries its spec")
+	assert.Equal(t, map[string]any{"observedGeneration": float64(1), "phase": "Running"}, reportedMade["status"],
+		"REP-2: every object carries its status")
+	assert.NotContains(t, reportedMade, "declarationId")
+	assert.NotContains(t, reportedMade, "orphaned")
+	for _, object := range objects {
+		for _, member := range []string{"metadata", "labels", "annotations"} {
+			assert.NotContains(t, object, member, "REP-2 names the members a report carries")
+		}
+	}
 }
 
 func TestRun_ReportsWithinMomentsOfAChange(t *testing.T) {
@@ -124,7 +136,9 @@ func TestRun_ReportsWithinMomentsOfAChange(t *testing.T) {
 func TestRun_ReportsAtLeastEvery5Minutes(t *testing.T) {
 	h := newHarness(t)
 	h.declare(poolA, pool(watched, "a", 1))
+	clock := &shiftedClock{}
 	cfg, fire := pacedReports(h.config())
+	cfg.Now = clock.now
 	service := h.run(cfg)
 	h.lastReport(carries("a"))
 	sent := len(h.reportsSent())
@@ -134,6 +148,7 @@ func TestRun_ReportsAtLeastEvery5Minutes(t *testing.T) {
 	require.Never(t, func() bool { return len(h.reportsSent()) > sent }, 300*time.Millisecond, tick,
 		"control: a pass that finds the same view does not report it again")
 
+	clock.shift(5 * time.Minute)
 	select {
 	case fire <- time.Now():
 	case <-time.After(eventually):
@@ -168,7 +183,7 @@ func TestRun_GoesOnApplyingDeclarationsAfterA413(t *testing.T) {
 	sent := len(h.reportsSent())
 	require.Never(t, func() bool { return len(h.reportsSent()) > sent }, 1500*time.Millisecond, tick,
 		"a refused view is not sent again until it changes")
-	assert.Contains(t, logged.String(), "garam refused the report as too large", "REP-6: the error is reported")
+	assert.Contains(t, logged.String(), "the report is too large for garam", "REP-6: the error is reported")
 
 	h.declare("pool-b", pool(watched, "b", 1))
 
@@ -183,12 +198,11 @@ func TestRun_GoesOnApplyingDeclarationsAfterA413(t *testing.T) {
 
 func TestRun_SendsAReportNotTakenAgainAfterABackOff(t *testing.T) {
 	h := newHarness(t)
-	failed := false
+	var failOnce atomic.Bool
 	h.setIntercept(func(w http.ResponseWriter, r *http.Request, _ http.Handler) bool {
-		if r.URL.Path != reportPath || failed {
+		if r.URL.Path != reportPath || !failOnce.CompareAndSwap(true, false) {
 			return false
 		}
-		failed = true
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return true
 	})
@@ -205,16 +219,23 @@ func TestRun_SendsAReportNotTakenAgainAfterABackOff(t *testing.T) {
 		return nil
 	}
 	h.declare(poolA, pool(watched, "a", 1))
+	service := h.run(cfg)
+	h.lastReport(carries("a"))
+	failOnce.Store(true)
 
-	h.run(cfg)
+	h.objects.put(object(watched, "new", nil))
 
+	h.settled(service, func(s declaration.Status) bool { return hasObject(s, "new") })
+	require.Eventually(t, func() bool { return !failOnce.Load() }, eventually, tick, "control: the report was refused")
 	require.Eventually(t, func() bool {
 		got := h.fix("latest-report", reference.FixtureRequest{Cluster: reference.GRN(h.record)})
-		return got["report"] != nil
-	}, eventually, tick, "the report was taken at its second send")
+		report, _ := got["report"].(map[string]any)
+		return report != nil && carries("new")(report)
+	}, eventually, tick, "the refused report was taken at its next send, with no pass in between")
 	mu.Lock()
 	defer mu.Unlock()
-	assert.Contains(t, waits, time.Second, "T-6: at least 1 second before the same request")
+	assert.True(t, slices.ContainsFunc(waits, func(d time.Duration) bool { return d > 900*time.Millisecond && d <= time.Second }),
+		"T-6: 1 second from the refused send to the next: %v", waits)
 }
 
 func TestRun_ReportsItsMode(t *testing.T) {
@@ -228,6 +249,154 @@ func TestRun_ReportsItsMode(t *testing.T) {
 	report := h.lastReport(func(r map[string]any) bool { return r["connector"] != nil })
 	connector, _ := report["connector"].(map[string]any)
 	assert.Equal(t, "reportOnly", connector["mode"])
+}
+
+// shiftedClock is the wall clock moved on by what the test shifts it by.
+type shiftedClock struct{ by atomic.Int64 }
+
+func (c *shiftedClock) now() time.Time        { return time.Now().Add(time.Duration(c.by.Load())) }
+func (c *shiftedClock) shift(d time.Duration) { c.by.Add(int64(d)) }
+
+// answering answers every report status, with Retry-After where it is not empty, once on is set.
+func answering(on *atomic.Bool, status int, after string) func(http.ResponseWriter, *http.Request, http.Handler) bool {
+	return func(w http.ResponseWriter, r *http.Request, _ http.Handler) bool {
+		if r.URL.Path != reportPath || !on.Load() {
+			return false
+		}
+		if after != "" {
+			w.Header().Set("Retry-After", after)
+		}
+		w.WriteHeader(status)
+		return true
+	}
+}
+
+// recordedWaits wraps cfg's waits with real ones it records.
+func recordedWaits(cfg declaration.Config) (declaration.Config, func() []time.Duration) {
+	var mu sync.Mutex
+	var waits []time.Duration
+	cfg.After = func(d time.Duration) <-chan time.Time {
+		mu.Lock()
+		waits = append(waits, d)
+		mu.Unlock()
+		return time.After(d)
+	}
+	return cfg, func() []time.Duration {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]time.Duration{}, waits...)
+	}
+}
+
+func TestRun_BacksOffAReportPastItsDeadline(t *testing.T) {
+	h := newHarness(t)
+	var failing atomic.Bool
+	h.setIntercept(answering(&failing, http.StatusServiceUnavailable, ""))
+	clock := &shiftedClock{}
+	cfg := h.config()
+	cfg.Now = clock.now
+	h.declare(poolA, pool(watched, "a", 1))
+	h.run(cfg)
+	h.lastReport(carries("a"))
+	failing.Store(true)
+	clock.shift(6 * time.Minute)
+	sent := len(h.reportsSent())
+
+	h.objects.put(object(watched, "new", nil))
+
+	require.Eventually(t, func() bool { return len(h.reportsSent()) > sent }, eventually, tick,
+		"control: the change past the deadline is sent")
+	require.Never(t, func() bool { return len(h.reportsSent()) > sent+2 }, 1500*time.Millisecond, tick,
+		"T-6: past REP-4's deadline a failed report still waits 1 s, then 2 s, before it is sent again")
+}
+
+func TestRun_HoldsAReportUntilRetryAfterWhateverPassesEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name, retryAfter string
+		wait             time.Duration
+	}{
+		{"waits Retry-After", "30", 30 * time.Second},
+		{"waits at most 60 s", "120", time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			var limited atomic.Bool
+			h.setIntercept(answering(&limited, http.StatusTooManyRequests, tc.retryAfter))
+			cfg, waits := recordedWaits(h.config())
+			h.declare(poolA, pool(watched, "a", 1))
+			service := h.run(cfg)
+			h.lastReport(carries("a"))
+			limited.Store(true)
+			h.objects.put(object(watched, "limited", nil))
+			h.lastReport(carries("a", "limited"))
+			sent := len(h.reportsSent())
+
+			h.objects.put(object(watched, "during", nil))
+			h.settled(service, func(s declaration.Status) bool { return hasObject(s, "during") })
+
+			require.Never(t, func() bool { return len(h.reportsSent()) > sent }, 1500*time.Millisecond, tick,
+				"T-6: a pass during the wait sends nothing before it")
+			assert.True(t, slices.ContainsFunc(waits(), func(d time.Duration) bool {
+				return d > tc.wait-time.Second && d <= tc.wait
+			}), "the wait follows Retry-After: %v", waits())
+		})
+	}
+}
+
+func TestRun_LeavesUnsentAReportOver4MiB(t *testing.T) {
+	h := newHarness(t)
+	var logged syncBuffer
+	cfg := h.config()
+	cfg.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	h.declare(poolA, pool(watched, "a", 1))
+	service := h.run(cfg)
+	h.lastReport(carries("a"))
+	sent := len(h.reportsSent())
+	huge := object(watched, "huge", nil)
+	huge.Object["spec"] = map[string]any{maxField: int64(1), "padding": strings.Repeat("x", 5<<20)}
+
+	h.objects.put(huge)
+
+	require.Eventually(t, func() bool { return strings.Contains(logged.String(), "the report is too large for garam") },
+		eventually, tick, "REP-6: the error is reported")
+	assert.Len(t, h.reportsSent(), sent, "a report garam need not take is not uploaded")
+	h.declare("pool-b", pool(watched, "b", 1))
+	h.settled(service, hasOutcome("pool-b", declaration.Applied))
+}
+
+func TestRun_LogsAReportGaramRefusedAtError(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		level  string
+	}{
+		{http.StatusBadRequest, "level=ERROR"},
+		{http.StatusServiceUnavailable, "level=WARN"},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			h := newHarness(t)
+			on := atomic.Bool{}
+			on.Store(true)
+			h.setIntercept(answering(&on, tc.status, ""))
+			var logged syncBuffer
+			cfg := h.config()
+			cfg.Log = slog.New(slog.NewTextHandler(&logged, nil))
+			h.declare(poolA, pool(watched, "a", 1))
+			h.run(cfg)
+
+			require.Eventually(t, func() bool {
+				for line := range strings.SplitSeq(logged.String(), "\n") {
+					if strings.Contains(line, "sending it again") {
+						return strings.Contains(line, tc.level)
+					}
+				}
+				return false
+			}, eventually, tick, "a report refused as wrong is an error, one not taken yet a warning")
+		})
+	}
+}
+
+func hasObject(s declaration.Status, name string) bool {
+	return slices.ContainsFunc(s.Objects, func(o declaration.Object) bool { return o.Ref.Name == name })
 }
 
 // syncBuffer is a log destination many goroutines write to.

@@ -54,9 +54,9 @@ type Service interface {
 type service struct {
 	cfg     Config
 	watched map[string]bool
-	// wake is signalled when the declarations held change, and reported when a pass has finished.
+	// wake is signalled when the declarations held change, and passDone when a pass has finished.
 	wake     chan struct{}
-	reported chan struct{}
+	passDone chan struct{}
 
 	mu sync.Mutex
 	// held are the declarations held, by identifier, and tombstones the ones deleted and not yet
@@ -86,7 +86,7 @@ func NewService(cfg Config) Service {
 	for _, namespace := range cfg.Namespaces {
 		watched[namespace] = true
 	}
-	return &service{cfg: cfg, watched: watched, wake: make(chan struct{}, 1), reported: make(chan struct{}, 1),
+	return &service{cfg: cfg, watched: watched, wake: make(chan struct{}, 1), passDone: make(chan struct{}, 1),
 		held:       map[string]declared{},
 		tombstones: map[string]bool{}}
 }
@@ -151,7 +151,7 @@ func (s *service) signal() {
 // passed tells the reports a pass has finished.
 func (s *service) passed() {
 	select {
-	case s.reported <- struct{}{}:
+	case s.passDone <- struct{}{}:
 	default:
 	}
 }

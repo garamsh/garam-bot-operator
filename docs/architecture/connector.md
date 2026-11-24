@@ -70,7 +70,7 @@ How the connector applies them (#441):
 
   A declaration for a namespace claimed elsewhere has no outcome, because nothing is reported there. In report-only mode, a declaration is `applied` only where the cluster already holds that generation, and otherwise has no outcome.
 - **An orphan** is one of the record's objects that no declaration held names, at the namespace and name its latest generation names.
-- **Reports (#442)** are built from the same pass the outcomes come from, so a report's outcomes and objects are one view (REP-1).
+- **Reports (#442)** are built from the same pass the outcomes come from: the objects as the pass read them, and the outcomes after its writes (REP-1). A write the pass made shows in the objects of the next report, which the write's own change wakes.
   - **What a report carries:** the pass's outcomes, the claimed and claimed-elsewhere namespaces, the mode, and the own objects of the claimed namespaces.
     - This record's garam-owned objects come with their declaration and whether they are orphaned.
     - Cluster-owned objects come with their spec.
@@ -79,9 +79,10 @@ How the connector applies them (#441):
   - **No Secret or ConfigMap can reach one:** the connector lists the four declared kinds and nothing else, so neither is ever read (REP-3).
   - **When it is sent:** once a pass finds the view changed, which a change of an object or a claim, or of the declarations held, wakes at once. An unchanged view is sent again every 5 minutes (REP-4).
   - **When garam does not take it:**
-    - A 413 is logged, and the view is sent again once it changes; declarations go on being applied (REP-6).
+    - A 413 is logged, and the view is sent again once it changes; declarations go on being applied (REP-6). A view whose encoding is over 4 MiB is treated the same way without being uploaded.
     - A 429 waits its `Retry-After`, at most 60 s.
-    - A 5xx or no answer is backed off from 1 s, doubling to 60 s (T-6).
+    - A 5xx or no answer is backed off from 1 s, doubling to 60 s (T-6). Any other refusal is backed off the same way and logged at error, since sending it again cannot help.
+    - Nothing is sent before the wait ends, neither for a pass nor for the 5-minute timer. A pass that ends during the wait is held, and the latest view is sent when the wait ends.
 - **A tombstone** deletes the record's objects for its identifier, in the claimed namespaces. A full set read after it drops it, so what it named and did not delete is reported `orphaned`. garam cannot yet tell that orphan from one it never asked to delete (#453).
 
 ### Rights in the user's cluster
@@ -98,7 +99,7 @@ These follow [ADR 0091](adr/0091-hold-only-namespaced-rights-in-a-users-cluster-
 - **CRDs:** installed by Helm with the installer's rights, and the only cluster-scoped objects the chart renders.
 - **No inbound path:** no LoadBalancer or NodePort Service, no Ingress, no webhook. A NetworkPolicy admits no ingress. Egress goes to the configured proxy, or else to garam on 443, plus DNS, plus the API server's range given as a value.
 - **Metrics:** off by default, and plain HTTP inside the cluster when turned on.
-- **Secrets:** no Secret or ConfigMap is ever reported, and no credential reaches a log, metric, event, status or report.
+- **Secrets:** no Secret or ConfigMap is ever reported, and no credential reaches a log, metric, event, status or report. A report does carry two free-text fields of a cluster-owned object as written, `spec.persona.instructions` and a status condition's `message` (REP-2, REP-9), so it holds no credential only while nobody types one into them.
 - **Images:** pinned by digest in the chart. A user can set the connector to report only.
 
 ## What garam owes
