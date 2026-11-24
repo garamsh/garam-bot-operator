@@ -343,6 +343,33 @@ func TestRun_HoldsAReportUntilRetryAfterWhateverPassesEnd(t *testing.T) {
 	}
 }
 
+func TestRun_WaitsRetryAfterFromTheAnswer(t *testing.T) {
+	h := newHarness(t)
+	clock := &shiftedClock{}
+	var limited atomic.Bool
+	h.setIntercept(func(w http.ResponseWriter, r *http.Request, _ http.Handler) bool {
+		if r.URL.Path != reportPath || !limited.Load() {
+			return false
+		}
+		clock.shift(10 * time.Second)
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		return true
+	})
+	cfg, waits := recordedWaits(h.config())
+	cfg.Now = clock.now
+	h.declare(poolA, pool(watched, "a", 1))
+	h.run(cfg)
+	h.lastReport(carries("a"))
+	limited.Store(true)
+
+	h.objects.put(object(watched, "slow", nil))
+
+	require.Eventually(t, func() bool {
+		return slices.ContainsFunc(waits(), func(d time.Duration) bool { return d > 29*time.Second && d <= 30*time.Second })
+	}, eventually, tick, "T-6: Retry-After runs from the answer, which arrived 10 s after the send")
+}
+
 func TestRun_LeavesUnsentAReportOver4MiB(t *testing.T) {
 	h := newHarness(t)
 	var logged syncBuffer

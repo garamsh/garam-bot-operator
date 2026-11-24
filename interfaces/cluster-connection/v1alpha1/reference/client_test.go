@@ -295,12 +295,15 @@ func (p page) ids() []string {
 	return out
 }
 
-// bot is a valid declared object.
+// bot is a valid declared object, by interface 1's schema.
 func bot(name string) map[string]any {
 	return map[string]any{
 		"apiVersion": "bot.garam.sh/v1alpha1", "kind": "Bot",
 		"metadata": map[string]any{"namespace": "bots", "name": name},
-		"spec":     map[string]any{"tokenSecretRef": "bot-tokens/token", "replicas": 1},
+		"spec": map[string]any{
+			"persona": map[string]any{"role": "reviewer"}, "agent": map[string]any{"harness": "claude-code"},
+			"permissions": map[string]any{"secrets": []any{"bot-tokens/token"}},
+		},
 	}
 }
 

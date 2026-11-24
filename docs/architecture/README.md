@@ -136,12 +136,13 @@ Before a delta between this file and the template is called stale, read it again
 | `adr/0085-ship-a-helm-chart-of-gaon-kinds-for-the-control-service-and-the-gaon-operator.md` | Ship a Helm chart of gaon kinds for the control service and the gaon operator | accepted; the gaon operator it deploys discontinued and not released by ADR-0086 |
 | `adr/0086-restore-the-kubernetes-operator-and-keep-the-gaon-operator-unreleased.md` | Restore the Kubernetes operator and keep the gaon operator unreleased | accepted |
 | `adr/0087-connect-a-users-cluster-through-a-connector-it-installs-that-dials-garam-over-https-long-poll.md` | Connect a user's cluster to garam through a connector it installs, which dials garam over HTTPS long-poll | accepted |
-| `adr/0088-register-a-connector-with-a-one-time-token-and-a-key-it-generates-in-the-cluster.md` | Register a connector with a one-time token and a key it generates in the cluster, and authenticate as a cluster garam records | accepted |
+| `adr/0088-register-a-connector-with-a-one-time-token-and-a-key-it-generates-in-the-cluster.md` | Register a connector with a one-time token and a key it generates in the cluster, and authenticate as a cluster garam records | accepted; the rotation period of decision 6 superseded by ADR-0094 |
 | `adr/0089-sync-declarations-both-ways-and-give-each-object-one-owner.md` | Sync declarations both ways between garam and a connected cluster, and give each object one owner | accepted |
 | `adr/0090-run-the-connector-as-a-binary-beside-the-manager-and-build-the-bot-reconciler-from-the-agent-workload.md` | Run the connector as its own binary beside the manager, and build the Bot reconciler from the Agent workload code | accepted |
 | `adr/0091-hold-only-namespaced-rights-in-a-users-cluster-open-no-inbound-port-and-keep-secrets-in-it.md` | Hold only namespaced rights in a user's cluster, open no inbound port, and keep secrets in the cluster | accepted |
 | `adr/0092-specify-the-garam-connector-boundary-as-the-cluster-connection-interface-with-conformance-suites.md` | Specify the garam-to-connector boundary as the cluster-connection interface, with conformance suites and a reference server | accepted |
-| `adr/0093-connect-every-cluster-aurora-included-by-a-registration-token-and-keys-it-generates-and-renews.md` | Connect every cluster, aurora included, by a registration token given once and keys it generates and renews itself | accepted |
+| `adr/0093-connect-every-cluster-aurora-included-by-a-registration-token-and-keys-it-generates-and-renews.md` | Connect every cluster, aurora included, by a registration token given once and keys it generates and renews itself | accepted; the rotation period of decision 3 superseded by ADR-0094 |
+| `adr/0094-let-the-operator-set-how-long-the-connectors-key-signs-before-it-rotates.md` | Let the operator set how long the connector's key signs before it rotates, 30 days unless set | accepted |
 
 ### Templates
 

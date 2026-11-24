@@ -116,6 +116,53 @@ test-e2e-control: garam-e2e ## Run the control service's e2e tests: the built bi
 		"$$(grep -c '^--- SKIP' "$$log") skipped"; \
 	rm -f "$$log"; exit $$status
 
+# conformance.md's suites, run from interfaces/cluster-connection/v1alpha1/conformance/ behind
+# -tags=conformance, so `make test` leaves them out. Each ends by counting its tests that passed,
+# failed and skipped, and the suite names every pending one, because a run whose tests all skipped
+# exits zero as one that ran them does.
+CONFORMANCE_DIR = ./interfaces/cluster-connection/v1alpha1/conformance
+CONFORMANCE_REFERENCE ?= $(LOCALBIN)/cluster-connection-reference
+
+# The server suite against the reference server, started on a root it generates for the run. Its
+# registration bound is raised so the suite's own registrations stay under it, and
+# throttle-spends-nothing still meets it. The fixture socket lives in a mktemp directory, so TMPDIR
+# must leave its path under the 108 bytes a Unix socket path allows.
+.PHONY: conformance-server
+conformance-server: ## Run conformance.md's server suite against the reference server.
+	go build -o "$(CONFORMANCE_REFERENCE)" ./interfaces/cluster-connection/v1alpha1/reference/cmd/cluster-connection-reference
+	@dir=$$(mktemp -d); status=0; \
+	"$(CONFORMANCE_REFERENCE)" --dir "$$dir" serve --registration-limit 200 >"$$dir/ready" 2>"$$dir/server.log" & pid=$$!; \
+	trap 'kill $$pid 2>/dev/null; rm -r -- "$${dir:?}"' EXIT; \
+	for _ in $$(seq 100); do [ -s "$$dir/ready" ] && break; sleep 0.1; done; \
+	[ -s "$$dir/ready" ] || { cat "$$dir/server.log" >&2; exit 1; }; \
+	CONFORMANCE_BASE_URL="$$(cat "$$dir/url")" CONFORMANCE_TRUST_FILE="$$dir/ca.pem" \
+	CONFORMANCE_FIXTURE="$(CONFORMANCE_REFERENCE) --dir $$dir" \
+		go test -tags=conformance $(CONFORMANCE_DIR)/server/ -v -count=1 -timeout 20m 2>&1 | tee "$$dir/log" || status=$$?; \
+	echo "conformance-server: every test of conformance.md's server suite, against the reference server:" \
+		"$$(grep -c '^    --- PASS' "$$dir/log") passed, $$(grep -c '^    --- FAIL' "$$dir/log") failed," \
+		"$$(grep -c '^    --- SKIP' "$$dir/log") skipped"; \
+	exit $$status
+
+# The client suite against cmd/connector, every placeholder of conformance.md's command line given,
+# and the identity Secret the connector chart creates empty (ADR 0091). Its tests run in parallel, so
+# client/reports/at-least-every-5m's real five minutes overlap the rest. It starts envtest and one
+# connector per test, so it is a heavy job.
+CONFORMANCE_CONNECTOR ?= $(LOCALBIN)/connector
+CONFORMANCE_CLIENT ?= $(CONFORMANCE_CONNECTOR) --garam-url={base-url} --garam-root-file={trust-file} \
+	--registration-token-file={token-file} --release-namespace={release-namespace} --release-name={release-name} \
+	--watch-namespaces={watch-namespaces} --rotation-period={rotation-period} --report-only={report-only}
+.PHONY: conformance-client
+conformance-client: setup-envtest ## Run conformance.md's client suite against cmd/connector.
+	go build -o "$(CONFORMANCE_CONNECTOR)" ./cmd/connector
+	@log=$$(mktemp); status=0; \
+	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+	CONFORMANCE_CLIENT='$(CONFORMANCE_CLIENT)' CONFORMANCE_CLIENT_SECRETS=garam-connector-identity \
+		go test -tags=conformance $(CONFORMANCE_DIR)/client/ -v -count=1 -parallel 12 -timeout 20m 2>&1 | tee "$$log" || status=$$?; \
+	echo "conformance-client: every test of conformance.md's client suite, against cmd/connector:" \
+		"$$(grep -c '^    --- PASS' "$$log") passed, $$(grep -c '^    --- FAIL' "$$log") failed," \
+		"$$(grep -c '^    --- SKIP' "$$log") skipped"; \
+	rm -f "$$log"; exit $$status
+
 # How long `go test` may run the Kind suite, every phase included. Without it
 # go test's default of 10 minutes applies, and AfterSuite was killed past it
 # with all nine specs passed (#276). Sized from the slowest phases measured on

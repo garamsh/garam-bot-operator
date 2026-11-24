@@ -1,7 +1,6 @@
 package reference
 
 import (
-	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -11,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/validation"
-
-	"github.com/garamsh/garam-agent-operator/internal/secretref"
+	"github.com/garamsh/garam-bot/api/declaration/v1alpha1"
+	"github.com/garamsh/garam-bot/api/declaration/v1alpha1/manifest"
 )
 
 const (
@@ -25,8 +23,11 @@ const (
 	opDelete         = "delete"
 )
 
-// declaredKinds are DECL-7's kinds, interface 1's at v1alpha1.
-var declaredKinds = []string{"Bot", "Workspace", "WorkspaceClass", "BotPool"}
+// declaredAPIVersion and declaredKinds are DECL-7's kinds, interface 1's at v1alpha1.
+var (
+	declaredAPIVersion = v1alpha1.GroupVersion.String()
+	declaredKinds      = []string{"Bot", "Workspace", "WorkspaceClass", "BotPool"}
+)
 
 // declaration is one declaration placed on a record. A tombstoned one stays, so its identifier is
 // never placed again and a report naming it is still the record's.
@@ -313,71 +314,25 @@ func (s *Server) expireCursors(grn GRN) (Expired, error) {
 	return Expired{Cluster: grn}, nil
 }
 
-// parseDeclaredObject proves object holds DECL-7's members, names no image (DECL-9) and names each
-// secret only as <secret-name>/<key> (DECL-8), and answers it with only those members.
+// parseDeclaredObject proves object is one admissible object of a declared kind by interface 1's own
+// parser, as garam and the connector prove it: a declared kind (DECL-7), secrets named only by
+// reference (DECL-8), and no image, since no field of the four kinds names one (DECL-9). It answers
+// the object with only DECL-7's members, as it was written.
 func parseDeclaredObject(object json.RawMessage) (json.RawMessage, error) {
-	var parsed declaredObject
-	// UseNumber keeps every number of spec as it was written, rather than as a float64.
-	decoder := json.NewDecoder(bytes.NewReader(object))
-	decoder.UseNumber()
-	if err := decoder.Decode(&parsed); err != nil {
+	parsed, err := manifest.Parse(object)
+	if err != nil {
+		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7 to DECL-9: %v", err)
+	}
+	if parsed.GetNamespace() == "" {
+		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7: metadata.namespace is missing")
+	}
+	var written declaredObject
+	if err := json.Unmarshal(object, &written); err != nil {
 		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7: the object is not a DeclaredObject")
 	}
-	switch {
-	case parsed.APIVersion == "":
-		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7: apiVersion is missing")
-	case !slices.Contains(declaredKinds, parsed.Kind):
-		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7: kind %q is not a declared kind", parsed.Kind)
-	case len(validation.IsDNS1123Label(parsed.Metadata.Namespace)) > 0:
-		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7: metadata.namespace is not a namespace name")
-	case len(validation.IsDNS1123Subdomain(parsed.Metadata.Name)) > 0:
-		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7: metadata.name is not an object name")
-	case parsed.Spec == nil:
-		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7: spec is missing")
-	}
-	if err := checkMembers("spec", parsed.Spec); err != nil {
-		return nil, err
-	}
-	normalized, err := json.Marshal(parsed)
+	normalized, err := json.Marshal(written)
 	if err != nil {
 		return nil, fmt.Errorf("encode a declared object: %w", err)
 	}
 	return normalized, nil
-}
-
-// checkMembers walks a spec. Until interface 1 names its fields, a member is read by its name: one
-// named image or ending in Image names an image, and one ending in Secret or SecretRef names a secret.
-func checkMembers(path string, value any) error {
-	switch v := value.(type) {
-	case map[string]any:
-		for name, member := range v {
-			at := path + "." + name
-			lower := strings.ToLower(name)
-			switch {
-			case strings.HasSuffix(lower, "image") || lower == "images":
-				return refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-9: %s names an image", at)
-			case strings.HasSuffix(lower, "secret") || strings.HasSuffix(lower, "secretref"):
-				if ref, ok := member.(string); !ok || !isSecretReference(ref) {
-					return refuse(http.StatusBadRequest, codeInvalidRequest,
-						"DECL-8: %s is not a <secret-name>/<key> reference", at)
-				}
-			}
-			if err := checkMembers(at, member); err != nil {
-				return err
-			}
-		}
-	case []any:
-		for i, item := range v {
-			if err := checkMembers(fmt.Sprintf("%s[%d]", path, i), item); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// isSecretReference reports whether ref is DECL-8's <secret-name>/<key>.
-func isSecretReference(ref string) bool {
-	_, _, err := secretref.Parse(ref)
-	return err == nil
 }

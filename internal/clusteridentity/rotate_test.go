@@ -453,6 +453,25 @@ func TestRun_RotatesEvery30Days(t *testing.T) {
 	assert.Same(t, testKeys()[1], h.store.last().Key)
 }
 
+func TestRun_RotatesEveryConfiguredPeriod(t *testing.T) {
+	h := newHarness(t)
+	h.rotationPeriod = 90 * time.Minute
+	connection := h.establish()
+	stop := errors.New("stop")
+	h.onSleep = func(n int, _ time.Duration) error {
+		if n == 2 {
+			return stop
+		}
+		return nil
+	}
+
+	err := connection.Run(context.Background())
+
+	require.ErrorIs(t, err, stop)
+	assert.Equal(t, []time.Duration{90 * time.Minute, 90 * time.Minute}, h.sleeps, "ADR 0094: the period configured")
+	assert.Len(t, h.rotations(), 1)
+}
+
 func TestIdentity_IsNeverLoggedNorWrittenToDisk(t *testing.T) {
 	h := newHarness(t)
 	scratch := t.TempDir()

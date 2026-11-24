@@ -9,7 +9,7 @@ There are two suites. Each reaches an implementation only through the protocol a
 | Suite | Runs against | Fixture the implementation supplies |
 |---|---|---|
 | Server | A server's base URL and its trust root | A command the suite runs with one subcommand per action. Each prints JSON: `mint-token`, `declare <file>`, `tombstone <id>`, `latest-report`, `revoke-keys`, `delete-cluster`, `expire-cursors`. garam implements it over its own API. The reference server implements it in memory. |
-| Client | The client under test, started by the suite against the reference server and a Kubernetes API server carrying interface 1's CRDs | A command line the suite fills in with the base URL, trust file, registration-token file, release namespace and watched namespaces |
+| Client | The client under test, started by the suite against the reference server and a Kubernetes API server carrying interface 1's CRDs | A command line the suite fills in, as §The client command line says |
 
 ### The server fixture
 
@@ -25,7 +25,28 @@ Each subcommand exits 0 and prints its answer as one JSON object, or, when the s
 | `delete-cluster <grn>` | Deletes the record. | `cluster` |
 | `expire-cursors <grn>` | Purges every tombstone of the record, and every cursor answered so far. | `cluster` |
 
-The suites are built under `conformance/` beside this file, as tests that run against a binary or a URL. Until they are, every test below is pending. The conformance runner reports pending tests by name.
+### The client command line
+
+`CONFORMANCE_CLIENT` is the client's command line, split on white space. The suite fills in each placeholder below where an argument names it.
+
+| Placeholder | Filled with |
+|---|---|
+| `{base-url}` | The base URL of a reference server the suite runs for the one test (T-3) |
+| `{trust-file}` | A PEM file holding the root that server's certificate chains to (T-2) |
+| `{token-file}` | A file holding a registration token minted for a new record (REG-1) |
+| `{release-namespace}`, `{release-name}` | The release the client is, which a claim names as `<release-namespace>/<release-name>` (CLAIM-1) |
+| `{watch-namespaces}` | The watched namespaces, comma-separated |
+| `{rotation-period}` | Optional. How long a key signs before the client rotates it, a Go duration. Tests that rotate fill it with seconds; an argument naming it is left out of every other test |
+| `{report-only}` | Optional. `true` where the client reports only (DECL-15), and `false` otherwise |
+
+A test whose placeholder the command line does not name is reported pending, by name. The client reaches the API server through the kubeconfig `KUBECONFIG` names, with the rights of `system:masters`. `CONFORMANCE_CLIENT_SECRETS` names the empty Secrets the client's installer creates in its release namespace before it starts, comma-separated.
+
+## Running the suites
+
+The suites are built under `conformance/` beside this file, as Go tests behind the build tag `conformance`. Each runs every test below under its name, and reports a test it cannot reach as pending, by name, after its results, never as passed.
+
+- **Server suite:** `CONFORMANCE_BASE_URL`, `CONFORMANCE_TRUST_FILE` and `CONFORMANCE_FIXTURE` (the fixture command, split on white space) name the server under test. `go test -tags=conformance ./conformance/server/` runs it. `make conformance-server` runs it against the reference server.
+- **Client suite:** `KUBEBUILDER_ASSETS` names envtest's binaries. `go test -tags=conformance ./conformance/client/` runs it, its tests in parallel. `make conformance-client` runs it against `cmd/connector`.
 
 ## Server suite
 
@@ -120,6 +141,9 @@ The suites are built under `conformance/` beside this file, as tests that run ag
 | `client/reports/within-10s-of-change` | REP-4 |
 | `client/reports/at-least-every-5m` | REP-4 |
 | `client/reports/goes-on-after-413` | REP-6 |
+| `client/reports/backs-off-on-5xx` | T-6, REP-4 |
+| `client/reports/waits-retry-after` | T-6, REP-4 |
+| `client/reports/after-restart` | REP-1, REP-5 |
 | `client/transport/never-listens` | T-1 |
 
-`client/transport/never-listens` checks that the client's Pod opens no listening socket other than its probes.
+`client/transport/never-listens` checks that the client opens no listening socket other than its probes. The suite runs the client as a process, reads its own sockets from `/proc` (Linux alone), and allows none, so a client that serves probes is started without them. Elsewhere the test is pending.

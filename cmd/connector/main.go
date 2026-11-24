@@ -47,6 +47,7 @@ type options struct {
 	identitySecret   string
 	watchNamespaces  string
 	reportOnly       bool
+	rotationPeriod   time.Duration
 }
 
 func main() {
@@ -63,6 +64,8 @@ func main() {
 	flag.StringVar(&o.watchNamespaces, "watch-namespaces", "",
 		"Comma-separated namespaces the connector watches, applies declarations to, and caches. Nothing else is read.")
 	flag.BoolVar(&o.reportOnly, "report-only", false, "Apply and delete nothing, and still report (DECL-15).")
+	flag.DurationVar(&o.rotationPeriod, "rotation-period", 30*24*time.Hour,
+		"How long the cluster's key signs before the connector rotates it, more than 0 (ADR 0094).")
 	flag.StringVar(&o.identitySecret, "identity-secret", "garam-connector-identity",
 		"The Secret in the release namespace that holds the cluster's key and record. The chart creates it empty.")
 	flag.Parse()
@@ -82,6 +85,9 @@ func run(ctx context.Context, o options, log *slog.Logger) error {
 		len(namespaces) == 0 {
 		return errors.New("--garam-url, --garam-root-file, --registration-token-file, --release-namespace, " +
 			"--release-name and --watch-namespaces are all required")
+	}
+	if o.rotationPeriod <= 0 {
+		return fmt.Errorf("--rotation-period is %v, and must be more than 0", o.rotationPeriod)
 	}
 	garam, err := garamClient(o.rootFile)
 	if err != nil {
@@ -104,6 +110,7 @@ func run(ctx context.Context, o options, log *slog.Logger) error {
 		Store:          secret.New(kube, o.releaseNamespace, o.identitySecret),
 		Log:            log,
 		RequestTimeout: requestTimeout,
+		RotationPeriod: o.rotationPeriod,
 	})
 	connection, err := identity.Establish(ctx)
 	if err != nil {

@@ -51,6 +51,7 @@ How this project's binaries are configured, and which repository owns each value
 | `--watch-namespaces` | The namespaces the connector watches, comma-separated. It caches, reads and writes them alone | none |
 | `--report-only` | Apply and delete nothing, and still report (DECL-15) | `false` |
 | `--identity-secret` | The Secret in the release namespace holding the cluster's key and record. It must exist: the chart creates it empty, and the connector never creates it | `garam-connector-identity` |
+| `--rotation-period` | How long the cluster's key signs before the connector rotates it. 0 or less is refused at start (ADR 0094) | `720h` |
 
 ### The control service, the gaon operator and the gaon chart
 

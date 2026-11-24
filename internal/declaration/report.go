@@ -101,6 +101,8 @@ func (s *service) reports(ctx context.Context) error {
 			continue
 		}
 		err := s.send(ctx, status)
+		// T-6's waits run from the answer, not from the send.
+		answered := s.cfg.Now()
 		var refused *unanswered
 		switch {
 		case err == nil, errors.Is(err, errReportTooLarge):
@@ -114,10 +116,10 @@ func (s *service) reports(ctx context.Context) error {
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case errors.As(err, &refused) && refused.status == http.StatusTooManyRequests:
-			notBefore = now.Add(refused.retryAfter)
+			notBefore = answered.Add(refused.retryAfter)
 		default:
 			s.notTaken(err, wait)
-			notBefore = now.Add(wait)
+			notBefore = answered.Add(wait)
 			wait = min(2*wait, lastBackoff)
 		}
 		held = true
