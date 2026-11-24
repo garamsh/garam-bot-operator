@@ -78,6 +78,8 @@ github.com/fxamacker/cbor/v2 v2.9.0 h1:NpKPmjDBgUfBms6tr6JZkTHtfFGcMKsw3eGcmD/sa
 github.com/fxamacker/cbor/v2 v2.9.0/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/garamsh/gaon/lib/api v0.0.0-20261113042354-2387cebd0b44 h1:UlYzohR5hpJxPFRdOWMuXaQaIyGnV6T6K6xDFnD1gnw=
 github.com/garamsh/gaon/lib/api v0.0.0-20261113042354-2387cebd0b44/go.mod h1:TDPrVRXD5vg8/jshkrxEB9BLFLAhgYSlhFoNQulKzgU=
+github.com/garamsh/garam-bot/api v0.0.0-20261124091800-c64ffab99e81 h1:zPRAdO7hxH4Ly0ukzBt+7npDqB2gKSiMotflxPWNckc=
+github.com/garamsh/garam-bot/api v0.0.0-20261124091800-c64ffab99e81/go.mod h1:yjXp3ICv7lDw3kY86ihaw51MruTldBVJAvCFZ+Ogys8=
 github.com/garamsh/garam/lib/errorx v0.0.0-20261113015820-43d700d30910 h1:AxnparRds/xwzccdulXSEm7W4vkfWPBxtsd6OZgZEzA=
 github.com/garamsh/garam/lib/errorx v0.0.0-20261113015820-43d700d30910/go.mod h1:11a+R5FsJ3g87McW+ZTygZNty2meQQd/0Ws6wR9moSQ=
 github.com/garamsh/garam/lib/grn v0.0.0-20261113015820-43d700d30910 h1:/7SrOKbuNI67hXPAVv6h2CIF6xBwyQScpSd3wSnR09c=

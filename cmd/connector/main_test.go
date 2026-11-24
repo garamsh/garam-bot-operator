@@ -116,3 +116,8 @@ func TestGaramClient_KeepsTheEnvironmentsProxy(t *testing.T) {
 	require.True(t, isTransport)
 	assert.NotNil(t, transport.Proxy, "HTTPS_PROXY is honoured")
 }
+
+func TestWatchedNamespaces_ReadsEachNameOnceWithoutBlanks(t *testing.T) {
+	assert.Equal(t, []string{"bots", "more-bots"}, watchedNamespaces(" bots, ,more-bots,bots,"))
+	assert.Empty(t, watchedNamespaces(" , "), "no name at all leaves the required flag unset")
+}

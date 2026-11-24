@@ -2,7 +2,7 @@
 
 How a user's own cluster is connected to garam: the chart a user installs, the connector program in it, its registration and identity, the declarations it syncs both ways, the rights it holds in the cluster, and what garam owes on its side.
 
-Registration and identity are built, in `cmd/connector` and `internal/clusteridentity` (#440), except registering again after a key is lost (#450). The rest is not built yet. This document states what is decided. Goal #436 lists the implementation issues, and each section names the decision it holds.
+Registration and identity are built, in `cmd/connector` and `internal/clusteridentity` (#440), except registering again after a key is lost (#450). Applying declarations is built, in `internal/declaration` (#441). The rest is not built yet. This document states what is decided. Goal #436 lists the implementation issues, and each section names the decision it holds.
 
 ## Current decisions
 
@@ -51,12 +51,29 @@ These follow [ADR 0089](adr/0089-sync-declarations-both-ways-and-give-each-objec
 - **Losing garam changes nothing in the cluster.**
 - **A declaration carries secrets only as `<secret-name>/<key>` references, and names no image.**
 
+How the connector applies them (#441):
+
+- **A pipeline.** The connector long-polls the declarations and holds the latest generation of each. A full set replaces what it holds only at its last page. A 410 reads the full set again. A pass reads the watched namespaces' claims and their objects, decides, and writes. It runs on every change of the declarations held, on every change of an object of a declared kind or of a claim, every 10 minutes, and again after a back-off when it failed. No pass runs before the first full set has been read.
+- **What it checks before applying.** Interface 1's own parser, `manifest.Parse` from `github.com/garamsh/garam-bot/api/declaration/v1alpha1`, admits an object as the API server would under strict field validation: a declared kind, secrets by reference alone, and no field naming an image. The object also needs `metadata.namespace`. A declaration that fails any of these is `invalid`, and so is one the API server refuses.
+- **What is applied.** The declaration's `apiVersion`, `kind`, namespace, name, labels, annotations and `spec`, with the ownership marker naming the record, the identifier and the generation. Nothing else of the object is applied.
+- **How it writes.** It writes under one field manager, `garam-connector`. An object is created where nothing holds its name. Every later write is a server-side apply that forces the fields a hand edit took, which reverts the edit. That apply is made on the `resourceVersion` the pass read, so an object changed since is decided again by the next pass rather than written over. The first apply after a create hands the create's fields to the apply's entry, so a field a later generation drops is removed. A delete carries the object's uid and `resourceVersion` as preconditions.
+- **Each declaration's outcome** is kept for the reports (#442):
+  - `applied` where the object is the record's for that identifier, at the generation applied;
+  - `conflict` where another object holds the name: a cluster-owned object, another record's, the record's own object for another declaration, or an object whose marker is malformed;
+  - `invalid`, as above;
+  - `namespaceNotWatched`.
+
+  A declaration for a namespace claimed elsewhere has no outcome, because nothing is reported there. In report-only mode, a declaration is `applied` only where the cluster already holds that generation, and otherwise has no outcome.
+- **An orphan** is one of the record's objects that no declaration held names, at the namespace and name its latest generation names.
+- **A tombstone** deletes the record's objects for its identifier, in the claimed namespaces. A full set read after it drops it, so what it named and did not delete is reported `orphaned`.
+
 ### Rights in the user's cluster
 
 These follow [ADR 0091](adr/0091-hold-only-namespaced-rights-in-a-users-cluster-open-no-inbound-port-and-keep-secrets-in-it.md).
 
 - **Rights:** Roles and RoleBindings in the release namespace and in each watched namespace, and no ClusterRole at runtime. Caches are restricted to those namespaces. RBAC cannot narrow Secret access below a namespace, so each program can read every Secret of a watched namespace, and a watched namespace holds only the bots' objects and the Secrets they reference.
 - **The identity Secret is the chart's to create, empty, and the connector's to write.** The connector never creates a Secret, because RBAC cannot narrow `create` by name. Its Role grants `get` and `update` on that one Secret by `resourceNames`, and no `create`, `list` or `watch`. The chart never writes the Secret's data after creating it, so an upgrade keeps the key. The chart is #445's.
+- **The connector's Role in each watched namespace** grants `get`, `list`, `watch`, `create`, `patch` and `delete` on interface 1's four kinds, and `get`, `list` and `watch` on Leases. Server-side apply, and the JSON patch that hands a create's fields to the apply's entry, are both `patch`. Its cache holds only the claim, by a field selector on the Lease's name, but RBAC cannot narrow `list` or `watch` by name. It never writes a Lease (CLAIM-2). The chart is #445's.
 - **CRDs:** installed by Helm with the installer's rights, and the only cluster-scoped objects the chart renders.
 - **No inbound path:** no LoadBalancer or NodePort Service, no Ingress, no webhook. A NetworkPolicy admits no ingress. Egress goes to the configured proxy, or else to garam on 443, plus DNS, plus the API server's range given as a value.
 - **Metrics:** off by default, and plain HTTP inside the cluster when turned on.
