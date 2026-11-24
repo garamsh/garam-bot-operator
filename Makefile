@@ -143,6 +143,26 @@ conformance-server: ## Run conformance.md's server suite against the reference s
 		"$$(grep -c '^    --- SKIP' "$$dir/log") skipped"; \
 	exit $$status
 
+# The client suite against cmd/connector, every placeholder of conformance.md's command line given,
+# and the identity Secret the connector chart creates empty (ADR 0091). Its tests run in parallel, so
+# client/reports/at-least-every-5m's real five minutes overlap the rest. It starts envtest and one
+# connector per test, so it is a heavy job.
+CONFORMANCE_CONNECTOR ?= $(LOCALBIN)/connector
+CONFORMANCE_CLIENT ?= $(CONFORMANCE_CONNECTOR) --garam-url={base-url} --garam-root-file={trust-file} \
+	--registration-token-file={token-file} --release-namespace={release-namespace} --release-name={release-name} \
+	--watch-namespaces={watch-namespaces} --rotation-period={rotation-period} --report-only={report-only}
+.PHONY: conformance-client
+conformance-client: setup-envtest ## Run conformance.md's client suite against cmd/connector.
+	go build -o "$(CONFORMANCE_CONNECTOR)" ./cmd/connector
+	@log=$$(mktemp); status=0; \
+	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+	CONFORMANCE_CLIENT='$(CONFORMANCE_CLIENT)' CONFORMANCE_CLIENT_SECRETS=garam-connector-identity \
+		go test -tags=conformance $(CONFORMANCE_DIR)/client/ -v -count=1 -parallel 12 -timeout 20m 2>&1 | tee "$$log" || status=$$?; \
+	echo "conformance-client: every test of conformance.md's client suite, against cmd/connector:" \
+		"$$(grep -c '^    --- PASS' "$$log") passed, $$(grep -c '^    --- FAIL' "$$log") failed," \
+		"$$(grep -c '^    --- SKIP' "$$log") skipped"; \
+	rm -f "$$log"; exit $$status
+
 # How long `go test` may run the Kind suite, every phase included. Without it
 # go test's default of 10 minutes applies, and AfterSuite was killed past it
 # with all nine specs passed (#276). Sized from the slowest phases measured on
