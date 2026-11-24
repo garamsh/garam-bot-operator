@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/distribution/reference v0.6.0
 	github.com/garamsh/gaon/lib/api v0.0.0-20261113042354-2387cebd0b44
+	github.com/garamsh/garam-bot/api v0.0.0-20261124091800-c64ffab99e81
 	github.com/garamsh/garam/lib/errorx v0.0.0-20261113015820-43d700d30910
 	github.com/garamsh/garam/lib/grn v0.0.0-20261113015820-43d700d30910
 	github.com/garamsh/garam/lib/platform-sdk-go v0.0.0-20261113015820-43d700d30910
@@ -25,9 +26,11 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 	go.etcd.io/etcd/server/v3 v3.6.14
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sync v0.23.0
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
 	k8s.io/api v0.36.0
+	k8s.io/apiextensions-apiserver v0.36.0
 	k8s.io/apimachinery v0.36.0
 	k8s.io/client-go v0.36.0
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
@@ -149,7 +152,6 @@ require (
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
@@ -162,7 +164,6 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apiextensions-apiserver v0.36.0 // indirect
 	k8s.io/apiserver v0.36.0 // indirect
 	k8s.io/component-base v0.36.0 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect

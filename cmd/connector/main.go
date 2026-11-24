@@ -1,5 +1,6 @@
 // Command connector connects a user's cluster to garam: it registers the cluster once with a registration
-// token, keeps the key it generated in one Secret, and rotates that key itself (ADR 0088, ADR 0090).
+// token, keeps the key it generated in one Secret, and rotates that key itself (ADR 0088, ADR 0090). It
+// applies garam's declarations to the namespaces it watches, one owner per object (ADR 0089).
 package main
 
 import (
@@ -13,14 +14,20 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/garamsh/garam-agent-operator/internal/clusteridentity"
 	"github.com/garamsh/garam-agent-operator/internal/clusteridentity/secret"
+	"github.com/garamsh/garam-agent-operator/internal/declaration"
+	kubeobjects "github.com/garamsh/garam-agent-operator/internal/declaration/kube"
 )
 
 // version is the connector's version, sent at registration; a release build sets it with -ldflags -X.
@@ -35,7 +42,10 @@ type options struct {
 	rootFile         string
 	tokenFile        string
 	releaseNamespace string
+	releaseName      string
 	identitySecret   string
+	watchNamespaces  string
+	reportOnly       bool
 }
 
 func main() {
@@ -47,6 +57,11 @@ func main() {
 	flag.StringVar(&o.tokenFile, "registration-token-file", "",
 		"File holding the registration token, read only while the cluster is not registered. It is never logged.")
 	flag.StringVar(&o.releaseNamespace, "release-namespace", "", "The namespace this release is installed in.")
+	flag.StringVar(&o.releaseName, "release-name", "",
+		"This release's name. A watched namespace is acted in only while its claim names <release-namespace>/<release-name>.")
+	flag.StringVar(&o.watchNamespaces, "watch-namespaces", "",
+		"Comma-separated namespaces the connector watches, applies declarations to, and caches. Nothing else is read.")
+	flag.BoolVar(&o.reportOnly, "report-only", false, "Apply and delete nothing, and still report (DECL-15).")
 	flag.StringVar(&o.identitySecret, "identity-secret", "garam-connector-identity",
 		"The Secret in the release namespace that holds the cluster's key and record. The chart creates it empty.")
 	flag.Parse()
@@ -61,9 +76,11 @@ func main() {
 }
 
 func run(ctx context.Context, o options, log *slog.Logger) error {
-	if o.garamURL == "" || o.rootFile == "" || o.tokenFile == "" || o.releaseNamespace == "" {
-		return errors.New(
-			"--garam-url, --garam-root-file, --registration-token-file and --release-namespace are all required")
+	namespaces := watchedNamespaces(o.watchNamespaces)
+	if o.garamURL == "" || o.rootFile == "" || o.tokenFile == "" || o.releaseNamespace == "" || o.releaseName == "" ||
+		len(namespaces) == 0 {
+		return errors.New("--garam-url, --garam-root-file, --registration-token-file, --release-namespace, " +
+			"--release-name and --watch-namespaces are all required")
 	}
 	garam, err := garamClient(o.rootFile)
 	if err != nil {
@@ -92,7 +109,41 @@ func run(ctx context.Context, o options, log *slog.Logger) error {
 		return err
 	}
 	log.Info("connected", "cluster", connection.Cluster())
-	return connection.Run(ctx)
+	objects, err := kubeobjects.New(restConfig, namespaces)
+	if err != nil {
+		return err
+	}
+	declarations := declaration.NewService(declaration.Config{
+		BaseURL:    o.garamURL,
+		HTTP:       connection.Client(),
+		Record:     string(connection.Cluster()),
+		Release:    o.releaseNamespace + "/" + o.releaseName,
+		Namespaces: namespaces,
+		ReportOnly: o.reportOnly,
+		Objects:    objects,
+		Log:        log,
+	})
+	group, ctx := errgroup.WithContext(ctx)
+	group.Go(func() error { return connection.Run(ctx) })
+	group.Go(func() error { return objects.Start(ctx) })
+	group.Go(func() error {
+		if !objects.WaitForCacheSync(ctx) {
+			return ctx.Err()
+		}
+		return declarations.Run(ctx)
+	})
+	return group.Wait()
+}
+
+// watchedNamespaces reads --watch-namespaces: each name once, without blanks.
+func watchedNamespaces(flagValue string) []string {
+	var out []string
+	for name := range strings.SplitSeq(flagValue, ",") {
+		if name = strings.TrimSpace(name); name != "" && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // garamClient verifies garam against the configured root alone, and presents nothing (T-2). It keeps
