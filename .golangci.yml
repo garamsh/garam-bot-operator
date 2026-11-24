@@ -64,6 +64,11 @@ linters:
       - linters:
           - goconst
         path: ^(internal/gaon|tests/gaon)/
+      # The reference server's tests spell each wire member and fixture
+      # value in the request they build, for the same reason.
+      - linters:
+          - goconst
+        path: ^interfaces/.*_test\.go$
       # Go 1.27 needs golangci-lint v2.15.0, whose modernize reports these
       # three in code the gaon import does not touch. Each goes when its
       # file is next changed, and then so does its entry here.

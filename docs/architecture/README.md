@@ -141,6 +141,7 @@ Before a delta between this file and the template is called stale, read it again
 | `adr/0090-run-the-connector-as-a-binary-beside-the-manager-and-build-the-bot-reconciler-from-the-agent-workload.md` | Run the connector as its own binary beside the manager, and build the Bot reconciler from the Agent workload code | accepted |
 | `adr/0091-hold-only-namespaced-rights-in-a-users-cluster-open-no-inbound-port-and-keep-secrets-in-it.md` | Hold only namespaced rights in a user's cluster, open no inbound port, and keep secrets in the cluster | accepted |
 | `adr/0092-specify-the-garam-connector-boundary-as-the-cluster-connection-interface-with-conformance-suites.md` | Specify the garam-to-connector boundary as the cluster-connection interface, with conformance suites and a reference server | accepted |
+| `adr/0093-connect-every-cluster-aurora-included-by-a-registration-token-and-keys-it-generates-and-renews.md` | Connect every cluster, aurora included, by a registration token given once and keys it generates and renews itself | accepted |
 
 ### Templates
 

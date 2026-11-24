@@ -11,6 +11,20 @@ There are two suites. Each reaches an implementation only through the protocol a
 | Server | A server's base URL and its trust root | A command the suite runs with one subcommand per action. Each prints JSON: `mint-token`, `declare <file>`, `tombstone <id>`, `latest-report`, `revoke-keys`, `delete-cluster`, `expire-cursors`. garam implements it over its own API. The reference server implements it in memory. |
 | Client | The client under test, started by the suite against the reference server and a Kubernetes API server carrying interface 1's CRDs | A command line the suite fills in with the base URL, trust file, registration-token file, release namespace and watched namespaces |
 
+### The server fixture
+
+Each subcommand exits 0 and prints its answer as one JSON object, or, when the server refuses it, exits non-zero and prints T-5's error body.
+
+| Subcommand | Does | Prints |
+|---|---|---|
+| `mint-token [--cluster <grn>] [--expired]` | Mints a registration token for the record named, or for a new record. `--expired` mints one already past REG-5's hour. | `registrationToken`, `cluster` |
+| `declare <file>` | Places the declaration the file holds, `{"cluster", "id", "object"}`, as a new one or, where `id` names one, as its next generation. It refuses an object breaking DECL-7, DECL-8 or DECL-9. `id` is optional. | `id`, `generation` |
+| `tombstone <id>` | Deletes the declaration by a tombstone. | `id`, `generation` |
+| `latest-report <grn>` | Reads the record's kept report and its `lastContactAt`, each `null` when there is none. | `cluster`, `lastContactAt`, `report` |
+| `revoke-keys <grn>` | Withdraws every key of the record. | `cluster` |
+| `delete-cluster <grn>` | Deletes the record. | `cluster` |
+| `expire-cursors <grn>` | Purges every tombstone of the record, and every cursor answered so far. | `cluster` |
+
 The suites are built under `conformance/` beside this file, as tests that run against a binary or a URL. Until they are, every test below is pending. The conformance runner reports pending tests by name.
 
 ## Server suite
@@ -39,6 +53,7 @@ The suites are built under `conformance/` beside this file, as tests that run ag
 | `server/rotation/refuses-authorization-by-retired-key` | ROT-2 |
 | `server/rotation/repeat-answers-first-success` | ROT-4 |
 | `server/rotation/refuses-third-key` | ROT-4 |
+| `server/rotation/refuses-key-held-before` | ROT-4 |
 | `server/rotation/predecessor-live-24h` | ROT-3 |
 | `server/declarations/full-set-without-cursor` | DECL-1, DECL-5 |
 | `server/declarations/changes-in-write-order` | DECL-2 |
