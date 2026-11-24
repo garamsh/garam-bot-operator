@@ -30,8 +30,8 @@ func ref(namespace, name string) declaration.Ref {
 func TestRun_AppliesTheFullSetEachMarkedAsThisRecordsObject(t *testing.T) {
 	h := newHarness(t)
 	labelled := pool(watched, "a", 3)
-	labelled["metadata"].(map[string]any)["labels"] = map[string]any{"team": "a"}
-	first := h.declare("pool-a", labelled)
+	labelled["metadata"].(map[string]any)["labels"] = map[string]any{team: "a"}
+	first := h.declare(poolA, labelled)
 	h.declare("pool-b", pool(other, "b", 5))
 
 	service := h.run(h.config())
@@ -43,19 +43,19 @@ func TestRun_AppliesTheFullSetEachMarkedAsThisRecordsObject(t *testing.T) {
 	require.NoError(t, err)
 	got, garamOwned := marker.Garam()
 	require.True(t, garamOwned, "DECL-11: applied as a garam-owned object")
-	assert.Equal(t, botv1.GaramDeclaration{Cluster: h.record, ID: "pool-a", Generation: first}, got)
+	assert.Equal(t, botv1.GaramDeclaration{Cluster: h.record, ID: poolA, Generation: first}, got)
 	assert.Equal(t, int64(3), applied.Object["spec"].(map[string]any)[maxField])
-	assert.Equal(t, map[string]string{"team": "a", botv1.LabelManagedBy: "garam"}, applied.GetLabels(),
+	assert.Equal(t, map[string]string{team: "a", botv1.LabelManagedBy: string(botv1.OwnerGaram)}, applied.GetLabels(),
 		"the declared labels, and the marker")
 	_, ok = h.objects.get(ref(other, "b"))
 	assert.True(t, ok)
-	result, _ := outcome(mustStatus(t, service), "pool-a")
-	assert.Equal(t, declaration.Result{ID: "pool-a", Generation: first, Outcome: declaration.Applied}, result)
+	result, _ := outcome(mustStatus(t, service), poolA)
+	assert.Equal(t, declaration.Result{ID: poolA, Generation: first, Outcome: declaration.Applied}, result)
 }
 
 func TestRun_AppliesAFullSetOnlyAtItsLastPage(t *testing.T) {
 	h := newHarness(t)
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 	h.declare("pool-b", pool(watched, "b", 1))
 	release := make(chan struct{})
 	var held atomic.Bool
@@ -93,9 +93,9 @@ func TestRun_AppliesAFullSetOnlyAtItsLastPage(t *testing.T) {
 
 func TestRun_ReadsTheFullSetAgainAfter410(t *testing.T) {
 	h := newHarness(t)
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 	service := h.run(h.config())
-	h.settled(service, hasOutcome("pool-a", declaration.Applied))
+	h.settled(service, hasOutcome(poolA, declaration.Applied))
 
 	h.fix("expire-cursors", referenceCluster(h))
 	h.declare("pool-b", pool(watched, "b", 1))
@@ -113,23 +113,23 @@ func TestRun_ReadsTheFullSetAgainAfter410(t *testing.T) {
 
 func TestRun_NeverAppliesALowerGenerationThanTheOneApplied(t *testing.T) {
 	h := newHarness(t)
-	h.objects.put(garamOwned(watched, "a", h.record, "pool-a", 7))
-	generation := h.declare("pool-a", pool(watched, "a", 9))
+	h.objects.put(garamOwned(watched, "a", h.record, poolA, 7))
+	generation := h.declare(poolA, pool(watched, "a", 9))
 	require.Less(t, generation, int64(7), "setup: the declaration's generation is below the one applied")
 
 	service := h.run(h.config())
 
-	status := h.settled(service, hasOutcome("pool-a", declaration.Applied))
-	result, _ := outcome(status, "pool-a")
+	status := h.settled(service, hasOutcome(poolA, declaration.Applied))
+	result, _ := outcome(status, poolA)
 	assert.Equal(t, int64(7), result.Generation, "the generation applied is reported")
 	assert.Empty(t, h.objects.written(), "DECL-10")
 }
 
 func TestRun_AppliesTheSameGenerationAgainOnEveryChange(t *testing.T) {
 	h := newHarness(t)
-	h.declare("pool-a", pool(watched, "a", 3))
+	h.declare(poolA, pool(watched, "a", 3))
 	service := h.run(h.config())
-	h.settled(service, hasOutcome("pool-a", declaration.Applied))
+	h.settled(service, hasOutcome(poolA, declaration.Applied))
 	require.Eventually(t, func() bool { return len(h.objects.written()) >= 1 }, eventually, tick)
 	edited, _ := h.objects.get(ref(watched, "a"))
 	edited.Object["spec"].(map[string]any)[maxField] = int64(99)
@@ -144,7 +144,7 @@ func TestRun_AppliesTheSameGenerationAgainOnEveryChange(t *testing.T) {
 
 func TestRun_AppliesEveryDeclarationAgainEvery10Minutes(t *testing.T) {
 	h := newHarness(t)
-	h.declare("pool-a", pool(watched, "a", 3))
+	h.declare(poolA, pool(watched, "a", 3))
 	var mu sync.Mutex
 	resync := make(chan time.Time)
 	asked := map[time.Duration]int{}
@@ -159,7 +159,7 @@ func TestRun_AppliesEveryDeclarationAgainEvery10Minutes(t *testing.T) {
 		return time.After(d)
 	}
 	service := h.run(cfg)
-	h.settled(service, hasOutcome("pool-a", declaration.Applied))
+	h.settled(service, hasOutcome(poolA, declaration.Applied))
 	require.Eventually(t, func() bool { return len(h.objects.asked()) >= 1 }, eventually, tick)
 	asks := len(h.objects.asked())
 
@@ -187,13 +187,13 @@ func TestRun_RefusesANameHeldByAnotherObject(t *testing.T) {
 			return object(watched, "a", nil)
 		}},
 		{"a garam-owned object of another record", "another cluster record", func(*harness) *unstructured.Unstructured {
-			return garamOwned(watched, "a", "grn:acme/iam/cluster/another", "pool-a", 1)
+			return garamOwned(watched, "a", "grn:acme/iam/cluster/another", poolA, 1)
 		}},
 		{"this record's object for another declaration", "declaration pool-z", func(h *harness) *unstructured.Unstructured {
 			return garamOwned(watched, "a", h.record, "pool-z", 1)
 		}},
 		{"an object whose marker is malformed", "malformed", func(*harness) *unstructured.Unstructured {
-			return object(watched, "a", map[string]string{botv1.LabelManagedBy: "garam"})
+			return object(watched, "a", map[string]string{botv1.LabelManagedBy: string(botv1.OwnerGaram)})
 		}},
 	}
 	for _, c := range cases {
@@ -201,15 +201,15 @@ func TestRun_RefusesANameHeldByAnotherObject(t *testing.T) {
 			h := newHarness(t)
 			held := c.object(h)
 			h.objects.put(held)
-			h.declare("pool-a", pool(watched, "a", 3))
+			h.declare(poolA, pool(watched, "a", 3))
 			h.declare("pool-b", pool(watched, "b", 3))
 
 			service := h.run(h.config())
 
 			status := h.settled(service, func(s declaration.Status) bool {
-				return hasOutcome("pool-a", declaration.Conflict)(s) && hasOutcome("pool-b", declaration.Applied)(s)
+				return hasOutcome(poolA, declaration.Conflict)(s) && hasOutcome("pool-b", declaration.Applied)(s)
 			})
-			result, _ := outcome(status, "pool-a")
+			result, _ := outcome(status, poolA)
 			assert.Contains(t, result.Message, c.says)
 			got, _ := h.objects.get(ref(watched, "a"))
 			assert.Equal(t, held.Object["spec"], got.Object["spec"], "DECL-14: the object holding the name is left as it is")
@@ -236,14 +236,14 @@ func TestRun_RefusesAnInvalidDeclarationAndAppliesNothingOfIt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
 			h.declare("pool-b", pool(watched, "b", 1))
-			h.setIntercept(injectChange(t, "pool-a", 1, invalid))
+			h.setIntercept(injectChange(t, poolA, 1, invalid))
 
 			service := h.run(h.config())
 
 			status := h.settled(service, func(s declaration.Status) bool {
-				return hasOutcome("pool-a", declaration.Invalid)(s) && hasOutcome("pool-b", declaration.Applied)(s)
+				return hasOutcome(poolA, declaration.Invalid)(s) && hasOutcome("pool-b", declaration.Applied)(s)
 			})
-			result, _ := outcome(status, "pool-a")
+			result, _ := outcome(status, poolA)
 			assert.NotEmpty(t, result.Message)
 			assert.Equal(t, []string{"create BotPool bots/b"}, h.objects.written(), "DECL-12: nothing of it is applied")
 		})
@@ -252,11 +252,11 @@ func TestRun_RefusesAnInvalidDeclarationAndAppliesNothingOfIt(t *testing.T) {
 
 func TestRun_ReportsADeclarationForANamespaceItDoesNotWatch(t *testing.T) {
 	h := newHarness(t)
-	h.declare("pool-a", pool("elsewhere", "a", 1))
+	h.declare(poolA, pool("elsewhere", "a", 1))
 
 	service := h.run(h.config())
 
-	h.settled(service, hasOutcome("pool-a", declaration.NamespaceNotWatched))
+	h.settled(service, hasOutcome(poolA, declaration.NamespaceNotWatched))
 	assert.Empty(t, h.objects.written())
 }
 
@@ -268,23 +268,23 @@ func TestRun_TakesTheAPIServersRefusalAsInvalid(t *testing.T) {
 		}
 		return nil
 	}
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 
 	service := h.run(h.config())
 
-	status := h.settled(service, hasOutcome("pool-a", declaration.Invalid))
-	result, _ := outcome(status, "pool-a")
+	status := h.settled(service, hasOutcome(poolA, declaration.Invalid))
+	result, _ := outcome(status, poolA)
 	assert.Contains(t, result.Message, "the API server refused the object")
 }
 
 func TestRun_DeletesOnlyOnATombstone(t *testing.T) {
 	h := newHarness(t)
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 	h.declare("pool-b", pool(watched, "b", 1))
 	service := h.run(h.config())
 	h.settled(service, func(s declaration.Status) bool { return len(s.Declarations) == 2 })
 
-	h.tombstone("pool-a")
+	h.tombstone(poolA)
 
 	h.settled(service, func(s declaration.Status) bool { return len(s.Declarations) == 1 })
 	require.Eventually(t, func() bool { _, ok := h.objects.get(ref(watched, "a")); return !ok }, eventually, tick)
@@ -297,12 +297,12 @@ func TestRun_ReportsAnOwnObjectTheFullSetDoesNotNameAsOrphaned(t *testing.T) {
 	h.objects.put(garamOwned(watched, "gone", h.record, "pool-gone", 2))
 	h.objects.put(garamOwned(watched, "theirs", "grn:acme/iam/cluster/another", "pool-x", 1))
 	// The object of a declaration held, at a name its latest generation no longer names.
-	h.objects.put(garamOwned(watched, "renamed", h.record, "pool-a", 1))
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.objects.put(garamOwned(watched, "renamed", h.record, poolA, 1))
+	h.declare(poolA, pool(watched, "a", 1))
 
 	service := h.run(h.config())
 
-	status := h.settled(service, hasOutcome("pool-a", declaration.Applied))
+	status := h.settled(service, hasOutcome(poolA, declaration.Applied))
 	assert.Equal(t, []declaration.Ref{ref(watched, "gone"), ref(watched, "renamed")}, status.Orphans,
 		"DECL-13; another record's object is not this record's orphan")
 	_, ok := h.objects.get(ref(watched, "gone"))
@@ -311,9 +311,9 @@ func TestRun_ReportsAnOwnObjectTheFullSetDoesNotNameAsOrphaned(t *testing.T) {
 
 func TestRun_InReportOnlyAppliesAndDeletesNothing(t *testing.T) {
 	h := newHarness(t)
-	h.objects.put(garamOwned(watched, "a", h.record, "pool-a", 1))
+	h.objects.put(garamOwned(watched, "a", h.record, poolA, 1))
 	h.objects.put(object(watched, "c", nil))
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 	h.declare("pool-b", pool(watched, "b", 1))
 	h.declare("pool-c", pool(watched, "c", 1))
 	cfg := h.config()
@@ -321,9 +321,9 @@ func TestRun_InReportOnlyAppliesAndDeletesNothing(t *testing.T) {
 	service := h.run(cfg)
 	h.settled(service, hasOutcome("pool-c", declaration.Conflict))
 
-	h.tombstone("pool-a")
+	h.tombstone(poolA)
 
-	status := h.settled(service, func(s declaration.Status) bool { _, held := outcome(s, "pool-a"); return !held })
+	status := h.settled(service, func(s declaration.Status) bool { _, held := outcome(s, poolA); return !held })
 	assert.True(t, status.ReportOnly)
 	assert.Empty(t, h.objects.written(), "DECL-15")
 	_, ok := h.objects.get(ref(watched, "a"))
@@ -343,12 +343,12 @@ func TestRun_ActsOnlyInNamespacesClaimedForItsRelease(t *testing.T) {
 			h := newHarness(t)
 			claim(h)
 			h.objects.put(garamOwned(other, "stale", h.record, "pool-stale", 1))
-			h.declare("pool-a", pool(watched, "a", 1))
+			h.declare(poolA, pool(watched, "a", 1))
 			h.declare("pool-b", pool(other, "b", 1))
 
 			service := h.run(h.config())
 
-			status := h.settled(service, hasOutcome("pool-a", declaration.Applied))
+			status := h.settled(service, hasOutcome(poolA, declaration.Applied))
 			assert.Equal(t, []string{watched}, status.Namespaces)
 			assert.Equal(t, []string{other}, status.ClaimedElsewhere, "CLAIM-2")
 			_, held := outcome(status, "pool-b")
@@ -391,11 +391,11 @@ func TestRun_BacksOffAPollThatWasNotAnswered(t *testing.T) {
 		mu.Unlock()
 		return ctx.Err()
 	}
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 
 	service := h.run(cfg)
 
-	h.settled(service, hasOutcome("pool-a", declaration.Applied))
+	h.settled(service, hasOutcome(poolA, declaration.Applied))
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}, waits, "T-6")
@@ -414,11 +414,11 @@ func TestRun_RunsAPassThatFailedAgain(t *testing.T) {
 		}
 		return nil
 	}
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 
 	service := h.run(h.config())
 
-	h.settled(service, hasOutcome("pool-a", declaration.Applied))
+	h.settled(service, hasOutcome(poolA, declaration.Applied))
 	require.Eventually(t, func() bool { _, ok := h.objects.get(ref(watched, "a")); return ok }, eventually, tick)
 }
 
@@ -477,13 +477,13 @@ func TestRun_ReportsNothingAppliedForAWriteThatFailed(t *testing.T) {
 		}
 		return nil
 	}
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 	h.declare("pool-b", pool(watched, "b", 1))
 
 	service := h.run(h.config())
 
 	status := h.settled(service, hasOutcome("pool-b", declaration.Applied))
-	_, reported := outcome(status, "pool-a")
+	_, reported := outcome(status, poolA)
 	assert.False(t, reported, "a create the API server forbade is not reported applied")
 	_, ok := h.objects.get(ref(watched, "a"))
 	assert.False(t, ok)
@@ -510,11 +510,11 @@ func TestRun_WaitsARetryAfterOfAtMost60Seconds(t *testing.T) {
 		mu.Unlock()
 		return ctx.Err()
 	}
-	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare(poolA, pool(watched, "a", 1))
 
 	service := h.run(cfg)
 
-	h.settled(service, hasOutcome("pool-a", declaration.Applied))
+	h.settled(service, hasOutcome(poolA, declaration.Applied))
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, []time.Duration{60 * time.Second}, waits, "an hour asked for is cut to T-6's last wait")

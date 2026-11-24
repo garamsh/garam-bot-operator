@@ -41,6 +41,7 @@ type decision struct {
 	writes    []write
 	results   map[string]Result
 	orphans   []Ref
+	objects   []Object
 	buried    []string
 	claimed   []string
 	elsewhere []string
@@ -94,7 +95,34 @@ func decide(record string, reportOnly bool, watched map[string]bool, held map[st
 		}
 	}
 	slices.SortFunc(d.orphans, compareRefs)
+	d.objects = reported(record, seen.objects, d.orphans)
 	return d
+}
+
+// reported are the own objects a report carries (REP-1, REP-2): this record's garam-owned objects, with
+// their declaration and whether they are orphaned, and the cluster-owned objects, with their spec.
+// Another record's object, and one whose marker is malformed, are neither.
+func reported(record string, objects []Held, orphans []Ref) []Object {
+	out := make([]Object, 0, len(objects))
+	for _, held := range objects {
+		if held.MarkerErr != nil {
+			continue
+		}
+		object := Object{Ref: held.Ref, UID: held.UID, Generation: held.Generation, Owner: held.Marker.Owner(),
+			Status: held.Status}
+		applied, garamOwned := held.Marker.Garam()
+		switch {
+		case garamOwned && applied.Cluster != record:
+			continue
+		case garamOwned:
+			object.DeclarationID, object.Orphaned = applied.ID, slices.Contains(orphans, held.Ref)
+		default:
+			object.Spec = held.Spec
+		}
+		out = append(out, object)
+	}
+	slices.SortFunc(out, func(a, b Object) int { return compareRefs(a.Ref, b.Ref) })
+	return out
 }
 
 // settle decides one held declaration: its outcome, if it has one, and the write it needs, if any.

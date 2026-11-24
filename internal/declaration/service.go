@@ -33,16 +33,19 @@ type Config struct {
 	Namespaces []string
 	// ReportOnly applies nothing and deletes nothing (DECL-15).
 	ReportOnly bool
-	Objects    Objects
-	Log        *slog.Logger
-	// Sleep and After default to a timer and time.After.
+	// Version is the connector's version, which every report names (REP-1).
+	Version string
+	Objects Objects
+	Log     *slog.Logger
+	// Now, Sleep and After default to the clock, a timer and time.After.
+	Now   func() time.Time
 	Sleep func(ctx context.Context, d time.Duration) error
 	After func(d time.Duration) <-chan time.Time
 }
 
-// Service applies garam's declarations to the watched namespaces.
+// Service applies garam's declarations to the watched namespaces, and reports what it found.
 type Service interface {
-	// Run polls the declarations and applies them until ctx ends.
+	// Run polls the declarations, applies them and reports, until ctx ends.
 	Run(ctx context.Context) error
 	// Status answers what the last pass found, and false before the first full set was applied.
 	Status() (Status, bool)
@@ -51,8 +54,9 @@ type Service interface {
 type service struct {
 	cfg     Config
 	watched map[string]bool
-	// wake is signalled when the declarations held change.
-	wake chan struct{}
+	// wake is signalled when the declarations held change, and passDone when a pass has finished.
+	wake     chan struct{}
+	passDone chan struct{}
 
 	mu sync.Mutex
 	// held are the declarations held, by identifier, and tombstones the ones deleted and not yet
@@ -74,12 +78,16 @@ func NewService(cfg Config) Service {
 	if cfg.After == nil {
 		cfg.After = time.After
 	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	watched := make(map[string]bool, len(cfg.Namespaces))
 	for _, namespace := range cfg.Namespaces {
 		watched[namespace] = true
 	}
-	return &service{cfg: cfg, watched: watched, wake: make(chan struct{}, 1), held: map[string]declared{},
+	return &service{cfg: cfg, watched: watched, wake: make(chan struct{}, 1), passDone: make(chan struct{}, 1),
+		held:       map[string]declared{},
 		tombstones: map[string]bool{}}
 }
 
@@ -87,6 +95,7 @@ func (s *service) Run(ctx context.Context) error {
 	group, ctx := errgroup.WithContext(ctx)
 	group.Go(func() error { return s.feed(ctx) })
 	group.Go(func() error { return s.passes(ctx) })
+	group.Go(func() error { return s.reports(ctx) })
 	return group.Wait()
 }
 
@@ -120,10 +129,10 @@ func (s *service) take(changes []change) {
 			continue
 		}
 		switch c.Op {
-		case "apply":
+		case opApply:
 			s.held[c.ID] = declare(s.cfg.Record, c.ID, c.Generation, c.Object)
 			delete(s.tombstones, c.ID)
-		case "delete":
+		case opDelete:
 			delete(s.held, c.ID)
 			s.tombstones[c.ID] = true
 		}
@@ -135,6 +144,14 @@ func (s *service) take(changes []change) {
 func (s *service) signal() {
 	select {
 	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+// passed tells the reports a pass has finished.
+func (s *service) passed() {
+	select {
+	case s.passDone <- struct{}{}:
 	default:
 	}
 }
@@ -177,6 +194,7 @@ func (s *service) pass(ctx context.Context) error {
 	held, tombstones := maps.Clone(s.held), maps.Clone(s.tombstones)
 	s.mu.Unlock()
 
+	observed := s.cfg.Now()
 	seen, err := s.read(ctx)
 	if err != nil {
 		return err
@@ -196,9 +214,11 @@ func (s *service) pass(ctx context.Context) error {
 	for _, id := range sortedKeys(decided.results) {
 		results = append(results, decided.results[id])
 	}
-	s.status = &Status{ReportOnly: s.cfg.ReportOnly, Namespaces: decided.claimed,
-		ClaimedElsewhere: decided.elsewhere, Declarations: results, Orphans: decided.orphans}
+	s.status = &Status{ObservedAt: observed, ReportOnly: s.cfg.ReportOnly, Namespaces: decided.claimed,
+		ClaimedElsewhere: decided.elsewhere, Declarations: results, Orphans: decided.orphans,
+		Objects: decided.objects}
 	s.mu.Unlock()
+	s.passed()
 	return errors.Join(failed...)
 }
 

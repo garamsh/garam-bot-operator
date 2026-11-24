@@ -25,6 +25,8 @@ import (
 
 const (
 	record = "grn:acme/iam/cluster/c1"
+	// holder is the release every claim in these tests names.
+	holder = "garam/connector"
 	// account names the ServiceAccount, its Role and its binding; handEdit is what a hand edit writes.
 	account  = "connector"
 	handEdit = "edited"
@@ -265,12 +267,12 @@ func TestClaim_ReadsTheClaimAndFindsNoneWhereThereIsNone(t *testing.T) {
 	assert.False(t, found)
 
 	require.NoError(t, k8sClient.Create(context.Background(), &coordinationv1.Lease{
-		Namespace: ns, Name: declaration.ClaimName, Spec: coordinationv1.LeaseSpec{HolderIdentity: ptr.To("garam/connector")},
+		Namespace: ns, Name: declaration.ClaimName, Spec: coordinationv1.LeaseSpec{HolderIdentity: ptr.To(holder)},
 	}))
 
 	require.Eventually(t, func() bool {
-		holder, found, err := objects.Claim(context.Background(), ns)
-		return err == nil && found && holder == "garam/connector"
+		claimed, found, err := objects.Claim(context.Background(), ns)
+		return err == nil && found && claimed == holder
 	}, eventually, tick)
 }
 
@@ -338,7 +340,7 @@ func TestObjects_RunUnderTheRoleConnectorMdStates(t *testing.T) {
 		Subjects: []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Namespace: ns, Name: account}},
 	}))
 	require.NoError(t, k8sClient.Create(ctx, &coordinationv1.Lease{
-		Namespace: ns, Name: declaration.ClaimName, Spec: coordinationv1.LeaseSpec{HolderIdentity: ptr.To("garam/connector")},
+		Namespace: ns, Name: declaration.ClaimName, Spec: coordinationv1.LeaseSpec{HolderIdentity: ptr.To(holder)},
 	}))
 	impersonated := rest.CopyConfig(cfg)
 	impersonated.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:" + ns + ":" + account}
@@ -346,8 +348,8 @@ func TestObjects_RunUnderTheRoleConnectorMdStates(t *testing.T) {
 	objects := started(t, impersonated, ns)
 
 	require.Eventually(t, func() bool {
-		holder, found, err := objects.Claim(ctx, ns)
-		return err == nil && found && holder == "garam/connector"
+		claimed, found, err := objects.Claim(ctx, ns)
+		return err == nil && found && claimed == holder
 	}, eventually, tick, "the claim is read by name")
 	require.NoError(t, objects.Create(ctx, workspaceClass(t, ns, "c", true)))
 	held := heldAs(t, objects, ns, "c", present)

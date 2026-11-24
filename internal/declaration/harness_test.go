@@ -23,6 +23,7 @@ import (
 	botv1 "github.com/garamsh/garam-bot/api/declaration/v1alpha1"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/garamsh/garam-agent-operator/interfaces/cluster-connection/v1alpha1/reference"
@@ -32,6 +33,12 @@ import (
 
 const (
 	declPath = "/cluster-connection/v1alpha1/clusters/self/declarations"
+	// version is the connector version every test runs as; poolA the declaration most tests place, and
+	// team a label it carries.
+	version    = "test"
+	poolA      = "pool-a"
+	team       = "team"
+	reportPath = "/cluster-connection/v1alpha1/clusters/self/reports"
 	// release is the release every test's claims name, and watched and other the namespaces it watches.
 	release = "garam/connector"
 	watched = "bots"
@@ -76,6 +83,8 @@ type harness struct {
 	mu        sync.Mutex
 	intercept func(w http.ResponseWriter, r *http.Request, next http.Handler) bool
 	polls     []string
+	// reports are the bodies of every report sent, in order.
+	reports []map[string]any
 }
 
 func newHarness(t *testing.T) *harness {
@@ -86,6 +95,13 @@ func newHarness(t *testing.T) *harness {
 		h.mu.Lock()
 		if r.URL.Path == declPath {
 			h.polls = append(h.polls, r.URL.RawQuery)
+		}
+		if r.URL.Path == reportPath {
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var sent map[string]any
+			_ = json.Unmarshal(body, &sent)
+			h.reports = append(h.reports, sent)
 		}
 		intercept := h.intercept
 		h.mu.Unlock()
@@ -104,7 +120,7 @@ func newHarness(t *testing.T) *harness {
 	require.NoError(t, os.WriteFile(tokenFile, []byte(got["registrationToken"].(string)), 0o600))
 	key := testKey()
 	connection, err := clusteridentity.NewService(clusteridentity.Config{
-		BaseURL: ts.URL, HTTP: ts.Client(), TokenFile: tokenFile, Version: "test", Store: &identityStore{},
+		BaseURL: ts.URL, HTTP: ts.Client(), TokenFile: tokenFile, Version: version, Store: &identityStore{},
 		GenerateKey: func() (*rsa.PrivateKey, error) { return key, nil },
 	}).Establish(context.Background())
 	require.NoError(t, err)
@@ -148,6 +164,27 @@ func (h *harness) setIntercept(f func(w http.ResponseWriter, r *http.Request, ne
 	h.intercept = f
 }
 
+func (h *harness) reportsSent() []map[string]any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]map[string]any{}, h.reports...)
+}
+
+// lastReport waits until a report satisfying ok was sent, and answers the last one sent.
+func (h *harness) lastReport(ok func(map[string]any) bool) map[string]any {
+	h.t.Helper()
+	var last map[string]any
+	require.Eventually(h.t, func() bool {
+		sent := h.reportsSent()
+		if len(sent) == 0 {
+			return false
+		}
+		last = sent[len(sent)-1]
+		return ok(last)
+	}, eventually, tick)
+	return last
+}
+
 func (h *harness) pollsSent() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -163,6 +200,7 @@ func (h *harness) config() declaration.Config {
 		Release:    release,
 		Namespaces: []string{watched, other},
 		Objects:    h.objects,
+		Version:    version,
 		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
@@ -294,7 +332,14 @@ func (m *memObjects) List(_ context.Context, namespace string) ([]declaration.He
 		if ref.Namespace != namespace {
 			continue
 		}
-		held := declaration.Held{Ref: ref, UID: string(object.GetUID()), ResourceVersion: object.GetResourceVersion()}
+		held := declaration.Held{Ref: ref, UID: string(object.GetUID()), ResourceVersion: object.GetResourceVersion(),
+			Generation: object.GetGeneration()}
+		if spec, ok := object.Object["spec"].(map[string]any); ok {
+			held.Spec = runtime.DeepCopyJSON(spec)
+		}
+		if status, ok := object.Object["status"].(map[string]any); ok {
+			held.Status = runtime.DeepCopyJSON(status)
+		}
 		held.Marker, held.MarkerErr = botv1.ManagementOf(object)
 		out = append(out, held)
 	}
@@ -311,10 +356,16 @@ func (m *memObjects) put(object *unstructured.Unstructured) {
 func (m *memObjects) store(object *unstructured.Unstructured) {
 	m.version++
 	ref := refOf(object)
+	// As an API server keeps them: the uid for the object's life, and a generation for each spec.
 	if existing, ok := m.objects[ref]; ok {
 		object.SetUID(existing.GetUID())
+		object.SetGeneration(existing.GetGeneration())
+		if !reflect.DeepEqual(existing.Object["spec"], object.Object["spec"]) {
+			object.SetGeneration(existing.GetGeneration() + 1)
+		}
 	} else {
 		object.SetUID(types.UID(fmt.Sprintf("uid-%d", m.version)))
+		object.SetGeneration(1)
 	}
 	object.SetResourceVersion(strconv.Itoa(m.version))
 	m.objects[ref] = object
