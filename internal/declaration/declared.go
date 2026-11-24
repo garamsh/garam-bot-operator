@@ -2,13 +2,12 @@ package declaration
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	botv1 "github.com/garamsh/garam-bot/api/declaration/v1alpha1"
 	"github.com/garamsh/garam-bot/api/declaration/v1alpha1/manifest"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	utiljson "k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // maxMessage bounds a Result's message, as REP-1's DeclarationOutcome does.
@@ -25,41 +24,25 @@ type declared struct {
 	invalid string
 }
 
-// declaredObject is what DECL-7 lets a declaration's object carry.
-type declaredObject struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Metadata   struct {
-		Namespace   string            `json:"namespace"`
-		Name        string            `json:"name"`
-		Labels      map[string]string `json:"labels,omitempty"`
-		Annotations map[string]string `json:"annotations,omitempty"`
-	} `json:"metadata"`
-	Spec json.RawMessage `json:"spec"`
-}
-
 // declare reads an apply change for record. A declaration whose object breaks DECL-7, DECL-8 or DECL-9
 // is held as invalid, so its outcome is reported and nothing of it is applied (DECL-12).
 func declare(record, id string, generation int64, raw json.RawMessage) declared {
 	d := declared{id: id, generation: generation}
-	var object declaredObject
-	if err := json.Unmarshal(raw, &object); err != nil {
-		d.invalid = "the object is not a JSON object of DeclaredObject's shape"
-		return d
-	}
-	d.ref = Ref{Kind: object.Kind, Namespace: object.Metadata.Namespace, Name: object.Metadata.Name}
-	if object.Metadata.Namespace == "" || len(object.Spec) == 0 {
-		d.invalid = "the object carries no metadata.namespace or no spec (DECL-7)"
-		return d
-	}
 	// interface 1's own parser admits what the API server admits under strict field validation: a
 	// declared kind (DECL-7), secrets by reference alone (DECL-8), and no image, since no field names
-	// one (DECL-9, IMG-1).
-	if _, err := manifest.Parse(raw); err != nil {
+	// one (DECL-9, IMG-1). What it answers is all that is applied, so what is checked is what is applied.
+	parsed, err := manifest.Parse(raw)
+	if err != nil {
 		d.invalid = bounded(err.Error())
 		return d
 	}
-	applied, err := applyObject(record, d, object)
+	kind := parsed.GetObjectKind().GroupVersionKind().Kind
+	d.ref = Ref{Kind: kind, Namespace: parsed.GetNamespace(), Name: parsed.GetName()}
+	if d.ref.Namespace == "" {
+		d.invalid = "the object carries no metadata.namespace (DECL-7)"
+		return d
+	}
+	applied, err := applyObject(record, d, parsed)
 	if err != nil {
 		d.invalid = bounded(err.Error())
 		return d
@@ -68,22 +51,26 @@ func declare(record, id string, generation int64, raw json.RawMessage) declared 
 	return d
 }
 
-// applyObject is the object applied for d: the declaration's own members, and the ownership marker
-// naming record, d's identifier and its generation (DECL-11). Nothing else of the object is applied.
-func applyObject(record string, d declared, object declaredObject) (*unstructured.Unstructured, error) {
-	var spec map[string]any
-	// apimachinery's decoder keeps an integer an int64, as an object read from the API server holds it.
-	if err := utiljson.Unmarshal(object.Spec, &spec); err != nil || spec == nil {
-		return nil, errors.New("spec is not a JSON object")
+// applyObject is the object applied for d: the parsed object's kind, namespace, name, labels,
+// annotations and spec, with its defaults, and the ownership marker naming record, d's identifier and
+// its generation (DECL-11). Nothing else of the object is applied.
+func applyObject(record string, d declared, parsed manifest.Object) (*unstructured.Unstructured, error) {
+	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("the parsed object cannot be read: %w", err)
+	}
+	spec, ok := content["spec"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("the parsed object carries no spec")
 	}
 	applied := &unstructured.Unstructured{Object: map[string]any{"spec": spec}}
-	applied.SetAPIVersion(object.APIVersion)
-	applied.SetKind(object.Kind)
-	applied.SetNamespace(object.Metadata.Namespace)
-	applied.SetName(object.Metadata.Name)
-	applied.SetLabels(object.Metadata.Labels)
-	applied.SetAnnotations(object.Metadata.Annotations)
-	err := botv1.MarkGaramOwned(applied, botv1.GaramDeclaration{Cluster: record, ID: d.id, Generation: d.generation})
+	applied.SetAPIVersion(APIVersion)
+	applied.SetKind(d.ref.Kind)
+	applied.SetNamespace(d.ref.Namespace)
+	applied.SetName(d.ref.Name)
+	applied.SetLabels(parsed.GetLabels())
+	applied.SetAnnotations(parsed.GetAnnotations())
+	err = botv1.MarkGaramOwned(applied, botv1.GaramDeclaration{Cluster: record, ID: d.id, Generation: d.generation})
 	if err != nil {
 		return nil, fmt.Errorf("the declaration cannot be marked: %w", err)
 	}

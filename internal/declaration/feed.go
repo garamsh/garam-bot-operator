@@ -147,11 +147,15 @@ func (s *service) poll(ctx context.Context, cursor string) (page, error) {
 	return got, nil
 }
 
-// retryAfter reads Retry-After as seconds, and as T-6's first wait where it is missing or unreadable.
+// retryAfter reads Retry-After as seconds, as T-6's first wait where it is missing or unreadable, and
+// as T-6's last where it asks for more, so no answer stops the polls for longer.
 func retryAfter(value string) time.Duration {
 	seconds, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || seconds < 1 {
+	switch {
+	case err != nil || seconds < 1:
 		return firstBackoff
+	case seconds > int(lastBackoff/time.Second):
+		return lastBackoff
 	}
 	return time.Duration(seconds) * time.Second
 }

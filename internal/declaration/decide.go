@@ -118,7 +118,8 @@ func settle(record string, reportOnly bool, watched, claimed map[string]bool, d 
 		if reportOnly {
 			return nil, nil
 		}
-		return result(Applied, d.generation, ""), &write{op: create, declaration: d}
+		// Applied only once the write succeeds: the write records it.
+		return nil, &write{op: create, declaration: d}
 	}
 	if why := heldOtherwise(record, d.id, object); why != "" {
 		return result(Conflict, d.generation, fmt.Sprintf("%s is held by %s", d.ref, why)), nil
@@ -133,8 +134,9 @@ func settle(record string, reportOnly bool, watched, claimed map[string]bool, d 
 	case reportOnly:
 		return result(Applied, d.generation, ""), nil
 	}
-	// The same generation is applied again, so a hand edit of the object is reverted (ADR 0089).
-	return result(Applied, d.generation, ""), &write{op: apply, declaration: d, held: object}
+	// The same generation is applied again, so a hand edit of the object is reverted (ADR 0089). It is
+	// applied only once the write succeeds.
+	return nil, &write{op: apply, declaration: d, held: object}
 }
 
 // heldOtherwise says what holds the object's name where it is not this record's garam-owned object for

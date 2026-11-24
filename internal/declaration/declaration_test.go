@@ -29,7 +29,9 @@ func ref(namespace, name string) declaration.Ref {
 
 func TestRun_AppliesTheFullSetEachMarkedAsThisRecordsObject(t *testing.T) {
 	h := newHarness(t)
-	first := h.declare("pool-a", pool(watched, "a", 3))
+	labelled := pool(watched, "a", 3)
+	labelled["metadata"].(map[string]any)["labels"] = map[string]any{"team": "a"}
+	first := h.declare("pool-a", labelled)
 	h.declare("pool-b", pool(other, "b", 5))
 
 	service := h.run(h.config())
@@ -43,6 +45,8 @@ func TestRun_AppliesTheFullSetEachMarkedAsThisRecordsObject(t *testing.T) {
 	require.True(t, garamOwned, "DECL-11: applied as a garam-owned object")
 	assert.Equal(t, botv1.GaramDeclaration{Cluster: h.record, ID: "pool-a", Generation: first}, got)
 	assert.Equal(t, int64(3), applied.Object["spec"].(map[string]any)[maxField])
+	assert.Equal(t, map[string]string{"team": "a", botv1.LabelManagedBy: "garam"}, applied.GetLabels(),
+		"the declared labels, and the marker")
 	_, ok = h.objects.get(ref(other, "b"))
 	assert.True(t, ok)
 	result, _ := outcome(mustStatus(t, service), "pool-a")
@@ -462,4 +466,56 @@ func injectChange(t *testing.T, id string, generation int64, object map[string]a
 		writeJSON(t, w, got)
 		return true
 	}
+}
+
+func TestRun_ReportsNothingAppliedForAWriteThatFailed(t *testing.T) {
+	h := newHarness(t)
+	h.objects.refuse = func(_ string, o *unstructured.Unstructured) error {
+		if o.GetName() == "a" {
+			return apierrors.NewForbidden(schema.GroupResource{Group: "bot.garam.sh", Resource: "botpools"}, "a",
+				errors.New("the Role grants no create"))
+		}
+		return nil
+	}
+	h.declare("pool-a", pool(watched, "a", 1))
+	h.declare("pool-b", pool(watched, "b", 1))
+
+	service := h.run(h.config())
+
+	status := h.settled(service, hasOutcome("pool-b", declaration.Applied))
+	_, reported := outcome(status, "pool-a")
+	assert.False(t, reported, "a create the API server forbade is not reported applied")
+	_, ok := h.objects.get(ref(watched, "a"))
+	assert.False(t, ok)
+}
+
+func TestRun_WaitsARetryAfterOfAtMost60Seconds(t *testing.T) {
+	h := newHarness(t)
+	throttled := false
+	h.setIntercept(func(w http.ResponseWriter, r *http.Request, _ http.Handler) bool {
+		if r.URL.Path != declPath || throttled {
+			return false
+		}
+		throttled = true
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		return true
+	})
+	var mu sync.Mutex
+	var waits []time.Duration
+	cfg := h.config()
+	cfg.Sleep = func(ctx context.Context, d time.Duration) error {
+		mu.Lock()
+		waits = append(waits, d)
+		mu.Unlock()
+		return ctx.Err()
+	}
+	h.declare("pool-a", pool(watched, "a", 1))
+
+	service := h.run(cfg)
+
+	h.settled(service, hasOutcome("pool-a", declaration.Applied))
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []time.Duration{60 * time.Second}, waits, "an hour asked for is cut to T-6's last wait")
 }

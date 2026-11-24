@@ -4,6 +4,8 @@ package kube
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 
 	botv1 "github.com/garamsh/garam-bot/api/declaration/v1alpha1"
@@ -32,7 +34,12 @@ type Objects struct {
 	cache   cache.Cache
 	client  client.Client
 	changed chan struct{}
+	// namespaces are the watched namespaces, the only ones written to.
+	namespaces map[string]bool
 }
+
+// ErrNotWatched is a write to a namespace the Objects do not watch, which is never sent.
+var ErrNotWatched = errors.New("the namespace is not watched")
 
 var _ declaration.Objects = (*Objects)(nil)
 
@@ -47,8 +54,10 @@ func New(cfg *rest.Config, namespaces []string) (*Objects, error) {
 		return nil, fmt.Errorf("register the declared kinds: %w", err)
 	}
 	restricted := make(map[string]cache.Config, len(namespaces))
+	watched := make(map[string]bool, len(namespaces))
 	for _, namespace := range namespaces {
 		restricted[namespace] = cache.Config{}
+		watched[namespace] = true
 	}
 	objects, err := cache.New(cfg, cache.Options{
 		Scheme:            scheme,
@@ -65,7 +74,7 @@ func New(cfg *rest.Config, namespaces []string) (*Objects, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build the Kubernetes client: %w", err)
 	}
-	return &Objects{cache: objects, client: c, changed: make(chan struct{}, 1)}, nil
+	return &Objects{cache: objects, client: c, changed: make(chan struct{}, 1), namespaces: watched}, nil
 }
 
 // Start watches the declared kinds and the claims, signals Changed on each change, and runs the cache
@@ -141,6 +150,9 @@ func (o *Objects) List(ctx context.Context, namespace string) ([]declaration.Hel
 // Create creates object. The fields it sets are under the field manager's update entry until the
 // first Apply over the object hands them to its apply entry.
 func (o *Objects) Create(ctx context.Context, object *unstructured.Unstructured) error {
+	if err := o.watched(object.GetNamespace()); err != nil {
+		return err
+	}
 	err := o.client.Create(ctx, object, client.FieldOwner(FieldManager), client.FieldValidation("Strict"))
 	if apierrors.IsAlreadyExists(err) {
 		return declaration.ErrNameTaken
@@ -151,9 +163,14 @@ func (o *Objects) Create(ctx context.Context, object *unstructured.Unstructured)
 	return nil
 }
 
-// Apply applies object by server-side apply, forcing the fields a hand edit took (ADR 0089 decision 2),
-// on the condition that the object is still the one held.
+// Apply makes the object held the declaration's again, on the condition that it is still the one held.
+// A hand edit is reverted whatever it did: object's spec replaces the held one whole, removing a field
+// another manager added as well as one it changed. A server-side apply then forces every field object
+// sets, the declared labels and annotations among them, back to the declaration's (ADR 0089 decision 2).
 func (o *Objects) Apply(ctx context.Context, object *unstructured.Unstructured, over declaration.Held) error {
+	if err := o.watched(over.Ref.Namespace); err != nil {
+		return err
+	}
 	live, err := o.live(ctx, over)
 	if err != nil {
 		return err
@@ -161,6 +178,9 @@ func (o *Objects) Apply(ctx context.Context, object *unstructured.Unstructured, 
 	// A Create left the fields it set under an update entry, where an apply that drops one would leave
 	// it in place.
 	if err := o.upgrade(ctx, live); err != nil {
+		return err
+	}
+	if err := o.replace(ctx, live, object); err != nil {
 		return err
 	}
 	object.SetResourceVersion(live.GetResourceVersion())
@@ -176,6 +196,9 @@ func (o *Objects) Apply(ctx context.Context, object *unstructured.Unstructured, 
 }
 
 func (o *Objects) Delete(ctx context.Context, held declaration.Held) error {
+	if err := o.watched(held.Ref.Namespace); err != nil {
+		return err
+	}
 	object := newObject(held.Ref.Kind)
 	object.SetNamespace(held.Ref.Namespace)
 	object.SetName(held.Ref.Name)
@@ -188,6 +211,34 @@ func (o *Objects) Delete(ctx context.Context, held declaration.Held) error {
 		return declaration.ErrChanged
 	case err != nil:
 		return fmt.Errorf("delete %s: %w", held.Ref, err)
+	}
+	return nil
+}
+
+// watched refuses a write outside the watched namespaces, whatever decided it.
+func (o *Objects) watched(namespace string) error {
+	if !o.namespaces[namespace] {
+		return fmt.Errorf("write to %s: %w", namespace, ErrNotWatched)
+	}
+	return nil
+}
+
+// replace sets live's spec to object's whole, by one JSON patch under live's resourceVersion, so a field
+// another manager added is removed as well as one it changed. A patch that changes nothing writes nothing.
+func (o *Objects) replace(ctx context.Context, live, object *unstructured.Unstructured) error {
+	patch, err := json.Marshal([]map[string]any{
+		{"op": "replace", "path": "/metadata/resourceVersion", "value": live.GetResourceVersion()},
+		{"op": "add", "path": "/spec", "value": object.Object["spec"]},
+	})
+	if err != nil {
+		return fmt.Errorf("encode the patch of %s/%s: %w", live.GetNamespace(), live.GetName(), err)
+	}
+	err = o.client.Patch(ctx, live, client.RawPatch(types.JSONPatchType, patch), client.FieldOwner(FieldManager))
+	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
+		return declaration.ErrChanged
+	}
+	if err != nil {
+		return fmt.Errorf("replace the spec of %s/%s: %w", live.GetNamespace(), live.GetName(), err)
 	}
 	return nil
 }

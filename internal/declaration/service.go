@@ -225,9 +225,10 @@ func (s *service) read(ctx context.Context) (view, error) {
 	return seen, nil
 }
 
-// carry carries out one write. A write the API server refused for the object it carries makes the
-// declaration invalid. One that lost a race with another writer is decided again by the next pass,
-// which that writer's change wakes.
+// carry carries out one write, and records a create or apply that succeeded as applied. A write the API
+// server refused for the object it carries makes the declaration invalid. One that lost a race with
+// another writer is decided again by the next pass, which that writer's change wakes. Any other failure
+// records nothing and is the pass's error, so the pass runs again.
 func (s *service) carry(ctx context.Context, w write, results map[string]Result) error {
 	var err error
 	switch w.op {
@@ -239,10 +240,10 @@ func (s *service) carry(ctx context.Context, w write, results map[string]Result)
 		err = s.cfg.Objects.Delete(ctx, w.held)
 	}
 	switch {
-	case err == nil:
+	case err == nil && w.op != remove:
+		results[w.declaration.id] = Result{ID: w.declaration.id, Generation: w.declaration.generation, Outcome: Applied}
 		return nil
-	case errors.Is(err, ErrNameTaken), errors.Is(err, ErrChanged):
-		delete(results, w.declaration.id)
+	case err == nil, errors.Is(err, ErrNameTaken), errors.Is(err, ErrChanged):
 		return nil
 	case w.op != remove && (apierrors.IsInvalid(err) || apierrors.IsBadRequest(err)):
 		results[w.declaration.id] = Result{ID: w.declaration.id, Generation: w.declaration.generation,
