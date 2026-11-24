@@ -227,16 +227,19 @@ func TestDeclare_RefusesObjectsBreakingDECL7To9(t *testing.T) {
 		return object
 	}
 	spec := func(o map[string]any) map[string]any { return o["spec"].(map[string]any) }
+	secrets := func(refs ...any) func(map[string]any) {
+		return func(o map[string]any) { spec(o)["permissions"] = map[string]any{"secrets": refs} }
+	}
 	cases := map[string]map[string]any{
-		"DECL-7 undeclared kind":  with(func(o map[string]any) { o["kind"] = "Secret" }),
-		"DECL-7 no spec":          with(func(o map[string]any) { delete(o, "spec") }),
-		"DECL-7 no namespace":     with(func(o map[string]any) { o["metadata"] = map[string]any{"name": "x"} }),
-		"DECL-8 secret value":     with(func(o map[string]any) { spec(o)["tokenSecretRef"] = map[string]any{"value": "x"} }),
-		"DECL-8 reference no key": with(func(o map[string]any) { spec(o)["tokenSecretRef"] = "bot-tokens" }),
-		"DECL-8 key of dots":      with(func(o map[string]any) { spec(o)["tokenSecretRef"] = "bot-tokens/.." }),
-		"DECL-8 nested secret":    with(func(o map[string]any) { spec(o)["env"] = []any{map[string]any{"apiSecret": "x"}} }),
-		"DECL-9 image":            with(func(o map[string]any) { spec(o)["image"] = "registry.example/bot:1" }),
-		"DECL-9 nested image":     with(func(o map[string]any) { spec(o)["runtime"] = map[string]any{"sidecarImage": "x"} }),
+		"DECL-7 undeclared kind":          with(func(o map[string]any) { o["kind"] = "Secret" }),
+		"DECL-7 no spec":                  with(func(o map[string]any) { delete(o, "spec") }),
+		"DECL-7 no namespace":             with(func(o map[string]any) { o["metadata"] = map[string]any{"name": "x"} }),
+		"DECL-7 an unknown field":         with(func(o map[string]any) { spec(o)["replicas"] = 1 }),
+		"DECL-8 a bare secret value":      with(secrets("s3cr3t-value")),
+		"DECL-8 a secret value as object": with(secrets(map[string]any{"value": "x"})),
+		"DECL-8 a key of dots":            with(secrets("bot-tokens/..")),
+		"DECL-8 a namespace named":        with(secrets("other/bot-tokens/token")),
+		"DECL-9 an image":                 with(func(o map[string]any) { spec(o)["agent"].(map[string]any)["image"] = "registry.example/bot:1" }),
 	}
 	for name, object := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -251,23 +254,11 @@ func TestDeclare_RefusesObjectsBreakingDECL7To9(t *testing.T) {
 		"control: a valid object is stored and sent, and none of the refused ones is")
 }
 
-func TestDeclare_KeepsNumbersAsWritten(t *testing.T) {
-	h := newHarness(t)
-	grn, bearer := h.connected()
-	object := bot("a")
-	object["spec"].(map[string]any)["replicas"] = json.Number("9007199254740993")
-	h.declare(grn, "", object)
-
-	sent := string(h.poll(bearer, "", 0).page(t).Changes[0].Object)
-
-	assert.Contains(t, sent, `"replicas":9007199254740993`, "2^53+1 is sent exactly, not rounded through a float64")
-}
-
 func TestDeclare_SendsOnlyDECL7Members(t *testing.T) {
 	h := newHarness(t)
 	grn, bearer := h.connected()
 	object := bot("a")
-	object["status"] = map[string]any{"phase": "Running"}
+	object["status"] = map[string]any{"observedGeneration": 1}
 	h.declare(grn, "", object)
 
 	var sent map[string]any
@@ -275,5 +266,5 @@ func TestDeclare_SendsOnlyDECL7Members(t *testing.T) {
 
 	assert.NotContains(t, sent, "status")
 	assert.Equal(t, "Bot", sent["kind"])
-	assert.Equal(t, "bot-tokens/token", sent["spec"].(map[string]any)["tokenSecretRef"])
+	assert.Equal(t, map[string]any{"secrets": []any{"bot-tokens/token"}}, sent["spec"].(map[string]any)["permissions"])
 }
