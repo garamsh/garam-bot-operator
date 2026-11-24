@@ -91,7 +91,7 @@ func TestExchangeFailedCountsAFailedExchangeByAudienceAndReason(t *testing.T) {
 	}))
 	t.Cleanup(refusing.Close)
 	source := machinetoken.NewSource(machinetoken.Config{
-		Endpoint: refusing.URL + "/oauth/token", Files: writeKeyIssuance(t, t.TempDir()),
+		Endpoint: refusing.URL + "/oauth/token", Identity: writeKeyIssuance(t, t.TempDir()),
 		HTTP: refusing.Client(), Failed: garam.ExchangeFailed(logr.Discard(), "control"),
 	})
 	_, err := source.Token(context.Background())
@@ -104,7 +104,7 @@ func TestExchangeFailedCountsAFailedExchangeByAudienceAndReason(t *testing.T) {
 	tlsConfig, err := garam.ServerTLS(stub.trustFile)
 	g.Expect(err).NotTo(HaveOccurred())
 	admitted := machinetoken.NewSource(machinetoken.Config{
-		Endpoint: "https://" + stub.address() + tokenPath, Files: writeKeyIssuance(t, t.TempDir()),
+		Endpoint: "https://" + stub.address() + tokenPath, Identity: writeKeyIssuance(t, t.TempDir()),
 		HTTP:   &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}},
 		Failed: garam.ExchangeFailed(logr.Discard(), "control"),
 	})

@@ -34,8 +34,8 @@ type Config struct {
 	// Endpoint is the URL the exchange is sent to: garam's /oauth/token on the listener this
 	// process dials. It need not equal the tokenUrl the assertion names.
 	Endpoint string
-	// Files are the identity's three files.
-	Files Files
+	// Identity is what each exchange signs as: Files for an issued key a deployer places.
+	Identity Identity
 	// Audience, where set, is the GRN of the operator the token is minted to be shown to; empty
 	// mints garam's own.
 	Audience string
@@ -165,7 +165,7 @@ type (
 // send performs one exchange, answering the token and the client_id it was exchanged under. A
 // failure answers its reason, and the wait garam asked for where it asked for one.
 func (s *Source) send(ctx context.Context, now time.Time) (string, string, time.Duration, time.Duration, Reason, error) {
-	id, err := readIdentity(s.cfg.Files)
+	id, err := s.cfg.Identity.Signer()
 	if err != nil {
 		return "", "", 0, 0, ReasonKey, err
 	}
@@ -175,7 +175,7 @@ func (s *Source) send(ctx context.Context, now time.Time) (string, string, time.
 	}
 	form := url.Values{
 		"grant_type":            {"client_credentials"},
-		"client_id":             {id.clientID},
+		"client_id":             {id.ClientID},
 		"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
 		"client_assertion":      {assertion},
 	}
@@ -209,7 +209,7 @@ func (s *Source) send(ctx context.Context, now time.Time) (string, string, time.
 		if answered.AccessToken == "" || !strings.EqualFold(answered.TokenType, "Bearer") || answered.ExpiresIn <= 0 {
 			return "", "", 0, 0, ReasonUnavailable, errors.New("garam's token answer carries no bearer token or no lifetime")
 		}
-		return answered.AccessToken, id.clientID, time.Duration(answered.ExpiresIn) * time.Second, 0, "", nil
+		return answered.AccessToken, id.ClientID, time.Duration(answered.ExpiresIn) * time.Second, 0, "", nil
 	case response.StatusCode == http.StatusTooManyRequests:
 		return "", "", 0, retryAfter(response.Header.Get("Retry-After")), ReasonThrottled,
 			errors.New("garam answered 429: too many exchanges")

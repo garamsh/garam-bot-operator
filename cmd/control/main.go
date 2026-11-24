@@ -260,7 +260,7 @@ func garamClient(o options) (*http.Client, *machinetoken.Source, string, error) 
 	source := machinetoken.NewSource(machinetoken.Config{
 		Endpoint:    strings.TrimSuffix(o.garamURL, "/") + garamTokenPath,
 		IdentityURL: strings.TrimSuffix(o.garamURL, "/") + garamIdentityPath,
-		Files:       o.operatorKeys,
+		Identity:    o.operatorKeys,
 		HTTP:        &http.Client{Timeout: garamTimeout, Transport: base},
 		Failed: func(failed *machinetoken.Error) {
 			slog.Error("exchange a client assertion for a garam token", "reason", failed.Reason,

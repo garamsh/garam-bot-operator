@@ -169,7 +169,7 @@ func (c *clock) Add(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.now =
 func newSource(s *stub, files machinetoken.Files, c *clock, audience string) *machinetoken.Source {
 	return machinetoken.NewSource(machinetoken.Config{
 		Endpoint: s.server.URL + "/oauth/token",
-		Files:    files,
+		Identity: files,
 		Audience: audience,
 		HTTP:     s.server.Client(),
 		Now:      c.Now,
@@ -291,7 +291,7 @@ func TestSource_ReportsInvalidClientByNameAndTriesNothingElse(t *testing.T) {
 	c := &clock{now: time.Unix(1_800_000_000, 0)}
 	var told []*machinetoken.Error
 	source := machinetoken.NewSource(machinetoken.Config{
-		Endpoint: s.server.URL + "/oauth/token", Files: files, HTTP: s.server.Client(), Now: c.Now,
+		Endpoint: s.server.URL + "/oauth/token", Identity: files, HTTP: s.server.Client(), Now: c.Now,
 		Failed: func(e *machinetoken.Error) { told = append(told, e) },
 	})
 	transport := &machinetoken.Transport{Source: source, Base: s.server.Client().Transport}
@@ -397,7 +397,7 @@ func TestSource_BacksOffWithABoundAndKeepsALiveToken(t *testing.T) {
 	c := &clock{now: time.Unix(1_800_000_000, 0)}
 	var waits []time.Duration
 	source := machinetoken.NewSource(machinetoken.Config{
-		Endpoint: s.server.URL + "/oauth/token", Files: files, HTTP: s.server.Client(), Now: c.Now,
+		Endpoint: s.server.URL + "/oauth/token", Identity: files, HTTP: s.server.Client(), Now: c.Now,
 		Failed: func(e *machinetoken.Error) { waits = append(waits, e.Until.Sub(c.Now())) },
 	})
 	held, err := source.Token(context.Background())
@@ -427,4 +427,47 @@ func TestSource_BacksOffWithABoundAndKeepsALiveToken(t *testing.T) {
 	require.ErrorAs(t, err, &failed, "an expired token is not presented")
 	assert.Equal(t, machinetoken.ReasonUnavailable, failed.Reason)
 	assert.NotErrorIs(t, err, machinetoken.ErrInvalidClient)
+}
+
+// heldIdentity is an Identity whose key lives in memory and can be replaced, as a connector's does.
+type heldIdentity struct {
+	mu  sync.Mutex
+	key *rsa.PrivateKey
+}
+
+func (h *heldIdentity) Signer() (machinetoken.Signer, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return machinetoken.Signer{Key: h.key, ClientID: clientID, TokenURL: tokenURL}, nil
+}
+
+func (h *heldIdentity) replace(key *rsa.PrivateKey) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.key = key
+}
+
+func TestSource_SignsEachExchangeWithTheKeyTheIdentityHoldsThen(t *testing.T) {
+	first, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	second, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	s := newStub(t, &first.PublicKey, &second.PublicKey)
+	held := &heldIdentity{key: first}
+	source := machinetoken.NewSource(machinetoken.Config{
+		Endpoint: s.server.URL + "/oauth/token", Identity: held, HTTP: s.server.Client(),
+		Now: (&clock{now: time.Unix(1_800_000_000, 0)}).Now,
+	})
+	token, err := source.Token(context.Background())
+	require.NoError(t, err)
+
+	held.replace(second)
+	source.Invalidate(token)
+	_, err = source.Token(context.Background())
+	require.NoError(t, err)
+
+	sent := s.sent()
+	require.Len(t, sent, 2)
+	assert.Same(t, &first.PublicKey, sent[0].verifiedWith)
+	assert.Same(t, &second.PublicKey, sent[1].verifiedWith, "the replaced key signs the next exchange, and no file is read")
 }

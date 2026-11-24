@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -154,8 +153,10 @@ func runServe(ctx context.Context, dir string, args []string, stdout, stderr io.
 	return err
 }
 
-// listenFixture listens at socket, created readable by this user alone, since the fixture authenticates
-// nothing. A socket a previous run left there is removed; anything else there is left and refused.
+// listenFixture listens at socket, reachable by this user alone, since the fixture authenticates nothing.
+// The socket is made in a directory only this user can enter, restricted, and only then renamed into
+// place, so it is never reachable by another user, and the process's umask is never changed. A socket a
+// previous run left there is removed; anything else there is left and refused.
 func listenFixture(socket string) (net.Listener, error) {
 	if info, err := os.Lstat(socket); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
@@ -165,11 +166,25 @@ func listenFixture(socket string) (net.Listener, error) {
 			return nil, fmt.Errorf("remove the stale %s: %w", socket, err)
 		}
 	}
-	previous := syscall.Umask(0o077)
-	listener, err := net.Listen("unix", socket)
-	syscall.Umask(previous)
+	private, err := os.MkdirTemp(filepath.Dir(socket), ".fixture-")
+	if err != nil {
+		return nil, fmt.Errorf("make a private directory beside %s: %w", socket, err)
+	}
+	defer func() { _ = os.RemoveAll(private) }()
+	staged := filepath.Join(private, FixtureSocket)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: staged, Net: "unix"})
 	if err != nil {
 		return nil, fmt.Errorf("listen at %s: %w", socket, err)
+	}
+	// The listener would unlink its staged path on close, which the rename below moves away.
+	listener.SetUnlinkOnClose(false)
+	if err := os.Chmod(staged, 0o600); err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("restrict %s: %w", socket, err)
+	}
+	if err := os.Rename(staged, socket); err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("move the socket to %s: %w", socket, err)
 	}
 	return listener, nil
 }

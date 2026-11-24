@@ -299,9 +299,10 @@ ci: verify-tidy lint-config lint fmt test build verify-build-context chart-check
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build the manager, control, gaon operator, guest supervisor and render binaries.
+build: manifests generate fmt vet ## Build the manager, control, connector, gaon operator, guest supervisor and render binaries.
 	go build -o bin/manager cmd/main.go
 	go build -o bin/control ./cmd/control
+	go build -o bin/connector ./cmd/connector
 	go build -o bin/gaon-operator ./cmd/gaon-operator
 	go build -o bin/gaon-guest ./cmd/gaon-guest
 	go build -o bin/gaon-render ./cmd/gaon-render

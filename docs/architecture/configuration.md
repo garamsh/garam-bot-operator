@@ -36,6 +36,19 @@ How this project's binaries are configured, and which repository owns each value
   - The manager's image is `controller:latest`, a name a consumer replaces rather than a registry this project claims. `make deploy` replaces it the same way, through a generated overlay under `dist/`.
 - **No secret value is configured anywhere.** The three key flags and `--garam-trust-file` name paths the kubelet writes into from the `garam-credential` Secret the base mounts, and what those files hold is placed by a person from `garam`'s key issuance and reaches the process as files. This operator writes none of them and holds no RBAC on that Secret. Nothing an overlay sets carries either, and an overlay is not where one would be put.
 
+### The connector
+
+- **The connector is configured by flags, and by nothing else.** `cmd/connector/main.go` declares every flag and its default. The chart that sets them is #445's, and no chart sets them yet.
+- **No secret value is a flag.** The registration token is read from the file `--registration-token-file` names, and only while the cluster is not registered. The key is generated in the connector and kept in the Secret `--identity-secret` names, and never in a file (ADR 0093).
+
+| Flag | What it names | Default |
+|---|---|---|
+| `--garam-url` | The cluster-connection base URL garam serves | none |
+| `--garam-root-file` | The PEM file holding the root garam's certificate chains to (T-2) | none |
+| `--registration-token-file` | The file holding the registration token given once at install | none |
+| `--release-namespace` | The namespace the release is installed in, where the identity Secret is | none |
+| `--identity-secret` | The Secret in the release namespace holding the cluster's key and record. It must exist: the chart creates it empty, and the connector never creates it | `garam-connector-identity` |
+
 ### The control service, the gaon operator and the gaon chart
 
 The Kubernetes operator above is the one this project releases. The control service is configured as follows, and the gaon operator, which is discontinued and not released (ADR 0086), only as far as its chart renders it.

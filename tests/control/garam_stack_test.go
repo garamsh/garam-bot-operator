@@ -285,7 +285,7 @@ func (s *garamStack) setUp(dir string, keys garamKeys) error {
 		return step("issue the controller's key", err, s.processes...)
 	}
 	s.controllerToken = machinetoken.NewSource(machinetoken.Config{
-		Endpoint: s.machineURL + "/oauth/token", Files: controllerKeys, Audience: s.hosted, HTTP: s.machine,
+		Endpoint: s.machineURL + "/oauth/token", Identity: controllerKeys, Audience: s.hosted, HTTP: s.machine,
 	})
 	s.controllerMachine = s.tokenClient(controllerKeys)
 	s.hostedMachine = s.tokenClient(suiteKeys)
@@ -312,7 +312,7 @@ func (s *garamStack) setUp(dir string, keys garamKeys) error {
 // exchanges for garam itself.
 func (s *garamStack) tokenClient(files machinetoken.Files) *http.Client {
 	source := machinetoken.NewSource(machinetoken.Config{
-		Endpoint: s.machineURL + "/oauth/token", Files: files, HTTP: s.machine,
+		Endpoint: s.machineURL + "/oauth/token", Identity: files, HTTP: s.machine,
 	})
 	return &http.Client{Transport: &machinetoken.Transport{Source: source, Base: s.machine.Transport}}
 }

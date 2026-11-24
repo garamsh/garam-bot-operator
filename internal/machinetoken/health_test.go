@@ -230,7 +230,7 @@ func TestSource_KeepCallsIdentitySoAnIdleSourceMeetsACallsOutcome(t *testing.T) 
 	s := newStub(t, public)
 	c := &clock{now: time.Unix(1_800_000_000, 0)}
 	source := machinetoken.NewSource(machinetoken.Config{
-		Endpoint: s.server.URL + "/oauth/token", Files: files, HTTP: s.server.Client(), Now: c.Now,
+		Endpoint: s.server.URL + "/oauth/token", Identity: files, HTTP: s.server.Client(), Now: c.Now,
 		IdentityURL: s.server.URL + "/identity",
 	})
 

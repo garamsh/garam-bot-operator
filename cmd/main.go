@@ -324,7 +324,7 @@ func main() {
 		source := machinetoken.NewSource(machinetoken.Config{
 			Endpoint:    "https://" + garamAddress + garamTokenPath,
 			IdentityURL: identityURL,
-			Files:       garamKeys,
+			Identity:    garamKeys,
 			Audience:    audience,
 			HTTP: &http.Client{Timeout: garamExchangeTimeout,
 				Transport: &http.Transport{TLSClientConfig: garamTLS}},
