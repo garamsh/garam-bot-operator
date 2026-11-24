@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/garamsh/garam-bot/api/declaration/v1alpha1"
 	"github.com/garamsh/garam-bot/api/declaration/v1alpha1/manifest"
 )
 
@@ -22,8 +23,11 @@ const (
 	opDelete         = "delete"
 )
 
-// declaredKinds are DECL-7's kinds, interface 1's at v1alpha1.
-var declaredKinds = []string{"Bot", "Workspace", "WorkspaceClass", "BotPool"}
+// declaredAPIVersion and declaredKinds are DECL-7's kinds, interface 1's at v1alpha1.
+var (
+	declaredAPIVersion = v1alpha1.GroupVersion.String()
+	declaredKinds      = []string{"Bot", "Workspace", "WorkspaceClass", "BotPool"}
+)
 
 // declaration is one declaration placed on a record. A tombstoned one stays, so its identifier is
 // never placed again and a report naming it is still the record's.

@@ -104,8 +104,8 @@ func checkReport(report Report) error {
 		}
 	}
 	for _, o := range report.Objects {
-		if !slices.Contains(declaredKinds, o.Kind) {
-			return invalid("REP-7: an object of kind %q is not of a declared kind", o.Kind)
+		if o.APIVersion != declaredAPIVersion || !slices.Contains(declaredKinds, o.Kind) {
+			return invalid("REP-7: an object of %s %s is not of a declared kind", o.APIVersion, o.Kind)
 		}
 		if !slices.Contains(owners, o.Owner) || o.Generation < 1 || o.Status == nil {
 			return invalid("object %s/%s lacks owner, generation or status", o.Namespace, o.Name)

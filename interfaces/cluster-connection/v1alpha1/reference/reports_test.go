@@ -116,10 +116,15 @@ func TestReport_RecordsLastContact(t *testing.T) {
 func TestReport_RefusesObjectsOfKindsNotDeclared(t *testing.T) {
 	h := newHarness(t)
 	grn, bearer := h.connected()
-	for _, kind := range []string{"Secret", "ConfigMap", "Deployment"} {
-		t.Run(kind, func(t *testing.T) {
+	lookalike := clusterObject("Bot", "refused")
+	lookalike["apiVersion"] = "example.com/v1alpha1"
+	refused := map[string]map[string]any{"Secret": clusterObject("Secret", "refused"),
+		"ConfigMap": clusterObject("ConfigMap", "refused"), "Deployment": clusterObject("Deployment", "refused"),
+		"a declared kind of another group": lookalike}
+	for name, object := range refused {
+		t.Run(name, func(t *testing.T) {
 			got := h.post(repPath, bearer, report(h.clock.Now(), nil,
-				[]map[string]any{clusterObject("Bot", "fine"), clusterObject(kind, "refused")}))
+				[]map[string]any{clusterObject("Bot", "fine"), object}))
 
 			assert.Equal(t, http.StatusBadRequest, got.status)
 			assert.Equal(t, "invalid_request", got.errorCode(t))

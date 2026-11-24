@@ -239,7 +239,9 @@ func TestDeclare_RefusesObjectsBreakingDECL7To9(t *testing.T) {
 		"DECL-8 a secret value as object": with(secrets(map[string]any{"value": "x"})),
 		"DECL-8 a key of dots":            with(secrets("bot-tokens/..")),
 		"DECL-8 a namespace named":        with(secrets("other/bot-tokens/token")),
-		"DECL-9 an image":                 with(func(o map[string]any) { spec(o)["agent"].(map[string]any)["image"] = "registry.example/bot:1" }),
+		"DECL-9 an image": with(func(o map[string]any) {
+			spec(o)["agent"].(map[string]any)["image"] = "registry.example/bot:1"
+		}),
 	}
 	for name, object := range cases {
 		t.Run(name, func(t *testing.T) {
