@@ -2,7 +2,7 @@
 
 How a user's own cluster is connected to garam: the chart a user installs, the connector program in it, its registration and identity, the declarations it syncs both ways, the rights it holds in the cluster, and what garam owes on its side.
 
-Registration and identity are built, in `cmd/connector` and `internal/clusteridentity` (#440), except registering again after a key is lost (#450). Applying declarations is built, in `internal/declaration` (#441). The rest is not built yet. This document states what is decided. Goal #436 lists the implementation issues, and each section names the decision it holds.
+Registration and identity are built, in `cmd/connector` and `internal/clusteridentity` (#440), except registering again after a key is lost (#450). Applying declarations and reporting are built, in `internal/declaration` (#441, #442). The rest is not built yet. This document states what is decided. Goal #436 lists the implementation issues, and each section names the decision it holds.
 
 ## Current decisions
 
@@ -70,6 +70,18 @@ How the connector applies them (#441):
 
   A declaration for a namespace claimed elsewhere has no outcome, because nothing is reported there. In report-only mode, a declaration is `applied` only where the cluster already holds that generation, and otherwise has no outcome.
 - **An orphan** is one of the record's objects that no declaration held names, at the namespace and name its latest generation names.
+- **Reports (#442)** are built from the same pass the outcomes come from, so a report's outcomes and objects are one view (REP-1).
+  - **What a report carries:** the pass's outcomes, the claimed and claimed-elsewhere namespaces, the mode, and the own objects of the claimed namespaces.
+    - This record's garam-owned objects come with their declaration and whether they are orphaned.
+    - Cluster-owned objects come with their spec.
+    - Every object comes with its status.
+  - **What it leaves out:** another record's object (CLAIM-3), and an object whose marker is malformed, which has neither owner (OWN-4).
+  - **No Secret or ConfigMap can reach one:** the connector lists the four declared kinds and nothing else, so neither is ever read (REP-3).
+  - **When it is sent:** once a pass finds the view changed, which a change of an object or a claim, or of the declarations held, wakes at once. An unchanged view is sent again every 5 minutes (REP-4).
+  - **When garam does not take it:**
+    - A 413 is logged, and the view is sent again once it changes; declarations go on being applied (REP-6).
+    - A 429 waits its `Retry-After`, at most 60 s.
+    - A 5xx or no answer is backed off from 1 s, doubling to 60 s (T-6).
 - **A tombstone** deletes the record's objects for its identifier, in the claimed namespaces. A full set read after it drops it, so what it named and did not delete is reported `orphaned`. garam cannot yet tell that orphan from one it never asked to delete (#453).
 
 ### Rights in the user's cluster

@@ -285,9 +285,21 @@ func held(object *unstructured.Unstructured) declaration.Held {
 		Ref:             declaration.Ref{Kind: object.GetKind(), Namespace: object.GetNamespace(), Name: object.GetName()},
 		UID:             string(object.GetUID()),
 		ResourceVersion: object.GetResourceVersion(),
+		Generation:      object.GetGeneration(),
+		Spec:            copied(object.Object["spec"]),
+		Status:          copied(object.Object["status"]),
 	}
 	h.Marker, h.MarkerErr = botv1.ManagementOf(object)
 	return h
+}
+
+// copied is a copy of a member of an object the cache holds, which the cache's own copy never shares.
+func copied(member any) map[string]any {
+	content, ok := member.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return runtime.DeepCopyJSON(content)
 }
 
 func newObject(kind string) *unstructured.Unstructured {

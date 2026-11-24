@@ -13,6 +13,11 @@ type Held struct {
 	Ref             Ref
 	UID             string
 	ResourceVersion string
+	// Generation is metadata.generation, and Spec and Status the object's own, as a report carries them
+	// (REP-2). Each is a copy the pipeline may keep.
+	Generation int64
+	Spec       map[string]any
+	Status     map[string]any
 	// Marker is the object's ownership marker. MarkerErr is set in its place where the marker is
 	// malformed, and such an object is acted on as neither owner's (OWN-4).
 	Marker    botv1.Management

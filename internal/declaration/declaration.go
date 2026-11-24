@@ -1,6 +1,8 @@
 package declaration
 
 import (
+	"time"
+
 	botv1 "github.com/garamsh/garam-bot/api/declaration/v1alpha1"
 )
 
@@ -44,8 +46,24 @@ type Ref struct {
 
 func (r Ref) String() string { return r.Kind + " " + r.Namespace + "/" + r.Name }
 
+// Object is an own object as a report carries it (REP-1, REP-2): this record's garam-owned object, or a
+// cluster-owned one, in a claimed namespace. An object whose marker is malformed is neither (OWN-4).
+type Object struct {
+	Ref        Ref
+	UID        string
+	Generation int64
+	Owner      botv1.Owner
+	// DeclarationID and Orphaned are a garam-owned object's, and Spec a cluster-owned object's.
+	DeclarationID string
+	Orphaned      bool
+	Spec          map[string]any
+	Status        map[string]any
+}
+
 // Status is what the last pass found: what a report is built from.
 type Status struct {
+	// ObservedAt is when the pass read the cluster.
+	ObservedAt time.Time
 	ReportOnly bool
 	// Namespaces are the watched namespaces whose claim names this release.
 	Namespaces []string
@@ -56,4 +74,6 @@ type Status struct {
 	Declarations []Result
 	// Orphans are this record's garam-owned objects that no declaration held names (DECL-13).
 	Orphans []Ref
+	// Objects are the own objects of the claimed namespaces, by namespace, kind and name.
+	Objects []Object
 }

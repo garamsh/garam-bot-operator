@@ -26,6 +26,12 @@ const (
 	maxPageBytes = 32 << 20
 )
 
+// opApply and opDelete are a change's op (DECL-2).
+const (
+	opApply  = "apply"
+	opDelete = "delete"
+)
+
 // change and page are DeclarationPage's members (DECL-1, DECL-2).
 type change struct {
 	Op         string          `json:"op"`
@@ -96,7 +102,7 @@ func (s *service) feed(ctx context.Context) error {
 		}
 		if staged != nil {
 			for _, c := range got.Changes {
-				if c.Op == "apply" {
+				if c.Op == opApply {
 					staged[c.ID] = declare(s.cfg.Record, c.ID, c.Generation, c.Object)
 				}
 			}

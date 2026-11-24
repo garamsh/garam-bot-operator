@@ -1,6 +1,7 @@
 // Command connector connects a user's cluster to garam: it registers the cluster once with a registration
 // token, keeps the key it generated in one Secret, and rotates that key itself (ADR 0088, ADR 0090). It
-// applies garam's declarations to the namespaces it watches, one owner per object (ADR 0089).
+// applies garam's declarations to the namespaces it watches, one owner per object, and reports what they
+// hold (ADR 0089).
 package main
 
 import (
@@ -120,6 +121,7 @@ func run(ctx context.Context, o options, log *slog.Logger) error {
 		Release:    o.releaseNamespace + "/" + o.releaseName,
 		Namespaces: namespaces,
 		ReportOnly: o.reportOnly,
+		Version:    version,
 		Objects:    objects,
 		Log:        log,
 	})
