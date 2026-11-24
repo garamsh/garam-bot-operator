@@ -68,7 +68,7 @@ func (c *connection) resolve(ctx context.Context, interrupted bool) error {
 			return c.promote(ctx)
 		case conflicted:
 			// A 409 may answer a rotation that took place under an earlier, lost answer. Only an exchange
-			// garam refused shows it did not; one that failed otherwise shows nothing.
+			// garam refused as invalid_client shows it did not; one that failed otherwise shows nothing.
 			switch c.successorExchange(ctx) {
 			case tookPlace:
 				return c.promote(ctx)
@@ -126,9 +126,10 @@ type settled int
 const (
 	// tookPlace is a token exchanged: the successor is live.
 	tookPlace settled = iota + 1
-	// notTaken is an exchange garam refused: the successor is not live.
+	// notTaken is an exchange garam refused as invalid_client: the successor is not live.
 	notTaken
-	// unsettled is an exchange that failed otherwise, which shows nothing.
+	// unsettled is an exchange that failed otherwise, which shows nothing: a 400 from a skewed clock, a 403,
+	// a 429, a 5xx or no answer. Abandoning on one could drop a live successor.
 	unsettled
 )
 
@@ -141,8 +142,7 @@ func (c *connection) successorExchange(ctx context.Context) settled {
 	switch {
 	case err == nil:
 		return tookPlace
-	case errors.As(err, &failed) &&
-		(failed.Reason == machinetoken.ReasonInvalidClient || failed.Reason == machinetoken.ReasonRefused):
+	case errors.As(err, &failed) && failed.Reason == machinetoken.ReasonInvalidClient:
 		return notTaken
 	}
 	return unsettled

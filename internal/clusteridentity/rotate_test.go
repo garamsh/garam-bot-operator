@@ -61,12 +61,12 @@ func TestClient_ExchangesOnceMoreOn401(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return true
 	})
-	exchanges := len(h.sent("/oauth/token"))
+	exchanges := len(h.sent(tokenPath))
 
 	status := poll(t, connection.Client(), h.base)
 
 	assert.Equal(t, http.StatusOK, status, "the request is repeated once under a fresh token")
-	assert.Len(t, h.sent("/oauth/token"), exchanges+1, "AUTH-3: one exchange more")
+	assert.Len(t, h.sent(tokenPath), exchanges+1, "AUTH-3: one exchange more")
 }
 
 func TestRotate_SignsTheAuthorizationWithTheCurrentKeyAndThenSignsWithTheSuccessor(t *testing.T) {
@@ -231,7 +231,7 @@ func TestRotate_After409(t *testing.T) {
 			case keysPath:
 				w.WriteHeader(http.StatusConflict)
 				return true
-			case "/oauth/token":
+			case tokenPath:
 				values, _ := urlValues(body)
 				if headerKID(t, values.Get("client_assertion")) == successor && !unavailable {
 					unavailable = true
@@ -248,6 +248,40 @@ func TestRotate_After409(t *testing.T) {
 		assert.Len(t, h.rotations(), 2, "a 503 at the exchange shows nothing, so the rotation was sent again")
 		assert.Equal(t, time.Second, h.sleeps[len(h.sleeps)-1], "T-6: after 1 second")
 	})
+}
+
+func TestRotate_After409KeepsTheSuccessorWhenItsExchangeIsRefusedOtherwise(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			h := newHarness(t)
+			connection := h.establish()
+			successor := kid(t, testKeys()[1])
+			h.setIntercept(func(w http.ResponseWriter, r *http.Request, body []byte, _ http.Handler) bool {
+				switch r.URL.Path {
+				case keysPath:
+					w.WriteHeader(http.StatusConflict)
+					return true
+				case tokenPath:
+					if values, _ := urlValues(body); headerKID(t, values.Get("client_assertion")) == successor {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(status)
+						_, _ = w.Write([]byte(`{"error":"invalid_request"}`))
+						return true
+					}
+				}
+				return false
+			})
+			stop := errors.New("stop")
+			h.onSleep = func(int, time.Duration) error { return stop }
+
+			err := connection.Rotate(context.Background())
+
+			require.ErrorIs(t, err, stop, "backed off, not abandoned")
+			require.NotNil(t, h.store.last().Successor, "a successor that may be live stays stored")
+			assert.Same(t, testKeys()[1], h.store.last().Successor)
+			assert.Same(t, testKeys()[0], h.store.last().Key)
+		})
+	}
 }
 
 func TestRotate_GivesUpASendLeftUnansweredAndSendsItAgain(t *testing.T) {
@@ -369,7 +403,7 @@ func TestRun_ResolvesARotationARestartInterruptedBeforeAnythingElse(t *testing.T
 		case keysPath:
 			answerThenDrop(t, w, r, next)
 			return true
-		case "/oauth/token":
+		case tokenPath:
 			if values, _ := urlValues(body); headerKID(t, values.Get("client_assertion")) == successor {
 				w.WriteHeader(http.StatusBadGateway)
 				return true
@@ -384,12 +418,12 @@ func TestRun_ResolvesARotationARestartInterruptedBeforeAnythingElse(t *testing.T
 	h.setIntercept(nil)
 	h.onSleep = nil
 
-	exchanges := len(h.sent("/oauth/token"))
+	exchanges := len(h.sent(tokenPath))
 
 	restarted, err := h.service().Establish(context.Background())
 
 	require.NoError(t, err)
-	assert.Len(t, h.sent("/oauth/token"), exchanges, "Establish leaves the rotation to Run: the current key is live")
+	assert.Len(t, h.sent(tokenPath), exchanges, "Establish leaves the rotation to Run: the current key is live")
 	waited := len(h.sleeps)
 	h.onSleep = func(int, time.Duration) error { return stop }
 	require.ErrorIs(t, restarted.Run(context.Background()), stop)

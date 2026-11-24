@@ -32,6 +32,8 @@ const (
 	regPath  = "/cluster-connection/v1alpha1/registrations"
 	keysPath = "/cluster-connection/v1alpha1/clusters/self/keys"
 	declPath = "/cluster-connection/v1alpha1/clusters/self/declarations"
+	// tokenPath is the reference server's exchange.
+	tokenPath = "/oauth/token"
 )
 
 // maxWaits bounds how often one test's Service may wait. Every Sleep returns at once, so a retry loop
@@ -314,7 +316,7 @@ func headerKID(t *testing.T, compact string) string {
 
 // exchangeKIDs are the kids of every assertion the server was sent at the exchange, in order.
 func (h *harness) exchangeKIDs() []string {
-	exchanges := h.sent("/oauth/token")
+	exchanges := h.sent(tokenPath)
 	out := make([]string, 0, len(exchanges))
 	for _, s := range exchanges {
 		values, err := urlValues(s.body)
