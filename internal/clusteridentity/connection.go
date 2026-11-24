@@ -1,7 +1,9 @@
 package clusteridentity
 
 import (
+	"context"
 	"crypto/rsa"
+	"errors"
 	"net/http"
 	"sync"
 
@@ -11,6 +13,9 @@ import (
 // connection is an established identity. The key lives here and in the KeyStore, and nowhere else.
 type connection struct {
 	s *service
+
+	// rotating is held for the whole of a rotation, so two never run at once.
+	rotating sync.Mutex
 
 	mu    sync.Mutex
 	state State
@@ -37,8 +42,10 @@ func (c *connection) Signer() (machinetoken.Signer, error) {
 	return signerOf(c.state.Key, *c.state.Record), nil
 }
 
+// Client follows redirects as the configured client does: the token is carried on every hop, so the
+// connector's client follows none.
 func (c *connection) Client() *http.Client {
-	return &http.Client{Transport: bearer{c: c, base: c.s.transport()}}
+	return &http.Client{Transport: bearer{c: c, base: c.s.transport()}, CheckRedirect: c.s.cfg.HTTP.CheckRedirect}
 }
 
 // set replaces the state held, and the source with it where the key changed.
@@ -49,6 +56,18 @@ func (c *connection) set(state State) {
 		c.source = c.s.newSource(c, state.Record.TokenURL)
 	}
 	c.state = state
+}
+
+// save stores state. Where another process wrote the store since, nothing is written over it: the
+// connection takes up what is stored, and the error is ErrAnotherWriter, on which Run stops.
+func (c *connection) save(ctx context.Context, state State) error {
+	err := c.s.cfg.Store.Save(ctx, state)
+	if errors.Is(err, ErrAnotherWriter) {
+		if stored, loadErr := c.s.cfg.Store.Load(ctx); loadErr == nil && stored.Record != nil {
+			c.set(stored)
+		}
+	}
+	return err
 }
 
 func (c *connection) current() (State, *machinetoken.Source) {

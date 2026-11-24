@@ -47,7 +47,7 @@ How this project's binaries are configured, and which repository owns each value
 | `--garam-root-file` | The PEM file holding the root garam's certificate chains to (T-2) | none |
 | `--registration-token-file` | The file holding the registration token given once at install | none |
 | `--release-namespace` | The namespace the release is installed in, where the identity Secret is | none |
-| `--identity-secret` | The Secret in the release namespace holding the cluster's key and record | `garam-connector-identity` |
+| `--identity-secret` | The Secret in the release namespace holding the cluster's key and record. It must exist: the chart creates it empty, and the connector never creates it | `garam-connector-identity` |
 
 ### The control service, the gaon operator and the gaon chart
 

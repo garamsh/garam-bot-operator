@@ -26,7 +26,8 @@ import (
 // version is the connector's version, sent at registration; a release build sets it with -ldflags -X.
 var version = "dev"
 
-// requestTimeout bounds each registration, exchange and rotation request.
+// requestTimeout bounds each request to garam: the client's Timeout each exchange, and clusteridentity's
+// RequestTimeout each registration and rotation, the exchange it carries included.
 const requestTimeout = 30 * time.Second
 
 type options struct {
@@ -47,7 +48,7 @@ func main() {
 		"File holding the registration token, read only while the cluster is not registered. It is never logged.")
 	flag.StringVar(&o.releaseNamespace, "release-namespace", "", "The namespace this release is installed in.")
 	flag.StringVar(&o.identitySecret, "identity-secret", "garam-connector-identity",
-		"The Secret in the release namespace that holds the cluster's key and record.")
+		"The Secret in the release namespace that holds the cluster's key and record. The chart creates it empty.")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -78,12 +79,13 @@ func run(ctx context.Context, o options, log *slog.Logger) error {
 		return fmt.Errorf("build the Kubernetes client: %w", err)
 	}
 	identity := clusteridentity.NewService(clusteridentity.Config{
-		BaseURL:   o.garamURL,
-		HTTP:      garam,
-		TokenFile: o.tokenFile,
-		Version:   version,
-		Store:     secret.Store{Client: kube, Namespace: o.releaseNamespace, Name: o.identitySecret},
-		Log:       log,
+		BaseURL:        o.garamURL,
+		HTTP:           garam,
+		TokenFile:      o.tokenFile,
+		Version:        version,
+		Store:          secret.New(kube, o.releaseNamespace, o.identitySecret),
+		Log:            log,
+		RequestTimeout: requestTimeout,
 	})
 	connection, err := identity.Establish(ctx)
 	if err != nil {
@@ -93,7 +95,9 @@ func run(ctx context.Context, o options, log *slog.Logger) error {
 	return connection.Run(ctx)
 }
 
-// garamClient verifies garam against the configured root alone, and presents nothing (T-2).
+// garamClient verifies garam against the configured root alone, and presents nothing (T-2). It keeps
+// the default transport's proxy and timeouts, and follows no redirect: a redirect would carry the
+// registration token, or the bearer token, to wherever it pointed.
 func garamClient(rootFile string) (*http.Client, error) {
 	root, err := os.ReadFile(rootFile)
 	if err != nil {
@@ -103,8 +107,17 @@ func garamClient(rootFile string) (*http.Client, error) {
 	if !roots.AppendCertsFromPEM(root) {
 		return nil, fmt.Errorf("%s holds no PEM certificate", rootFile)
 	}
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, errors.New("the default HTTP transport is not an *http.Transport")
+	}
+	transport := base.Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13}
 	return &http.Client{
 		Timeout:   requestTimeout,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13}},
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}, nil
 }

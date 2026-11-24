@@ -54,8 +54,11 @@ type answer struct {
 	body       []byte
 }
 
-// post sends body as JSON to path over client, and reads the answer by its status alone.
+// post sends body as JSON to path over client, and reads the answer by its status alone. A request
+// unanswered within RequestTimeout is lost, so no retry loop waits on one send for good.
 func (s *service) post(ctx context.Context, client *http.Client, path string, body any) answer {
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
+	defer cancel()
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return answer{outcome: lost}

@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,50 +31,63 @@ const (
 	attemptedData = "registrationAttempt"
 )
 
-// Store is a clusteridentity.KeyStore over the Secret Name in Namespace.
+// Store is a clusteridentity.KeyStore over one Secret the chart creates empty. It never creates a Secret,
+// so its Role needs only get and update, on that Secret's name alone.
 type Store struct {
-	Client    kubernetes.Interface
-	Namespace string
-	Name      string
+	client    kubernetes.Interface
+	namespace string
+	name      string
+
+	mu sync.Mutex
+	// read is the Secret as last read or written here. A Save updates it on its resourceVersion alone.
+	read *corev1.Secret
 }
 
-var _ clusteridentity.KeyStore = Store{}
+var _ clusteridentity.KeyStore = (*Store)(nil)
 
-// Load answers the State the Secret holds, or clusteridentity.ErrNoState where there is no Secret.
-func (s Store) Load(ctx context.Context) (clusteridentity.State, error) {
-	found, err := s.Client.CoreV1().Secrets(s.Namespace).Get(ctx, s.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return clusteridentity.State{}, clusteridentity.ErrNoState
-	}
+// New returns a Store over the Secret name in namespace.
+func New(client kubernetes.Interface, namespace, name string) *Store {
+	return &Store{client: client, namespace: namespace, name: name}
+}
+
+// Load answers the State the Secret holds, or clusteridentity.ErrNoState where the Secret holds no data.
+// A missing Secret is an error: the chart creates it, and the connector does not.
+func (s *Store) Load(ctx context.Context) (clusteridentity.State, error) {
+	found, err := s.client.CoreV1().Secrets(s.namespace).Get(ctx, s.name, metav1.GetOptions{})
 	if err != nil {
-		return clusteridentity.State{}, fmt.Errorf("read the identity Secret %s/%s: %w", s.Namespace, s.Name, err)
+		return clusteridentity.State{}, fmt.Errorf("read the identity Secret %s/%s: %w", s.namespace, s.name, err)
+	}
+	s.mu.Lock()
+	s.read = found
+	s.mu.Unlock()
+	if len(found.Data) == 0 {
+		return clusteridentity.State{}, clusteridentity.ErrNoState
 	}
 	return decode(found.Data)
 }
 
-// Save writes state into the Secret, creating it where there is none.
-func (s Store) Save(ctx context.Context, state clusteridentity.State) error {
+// Save writes state into the Secret, on the condition that nobody wrote it after the last Load or Save
+// here; otherwise it answers clusteridentity.ErrAnotherWriter.
+func (s *Store) Save(ctx context.Context, state clusteridentity.State) error {
 	data, err := encode(state)
 	if err != nil {
 		return err
 	}
-	secrets := s.Client.CoreV1().Secrets(s.Namespace)
-	found, err := secrets.Get(ctx, s.Name, metav1.GetOptions{})
-	switch {
-	case apierrors.IsNotFound(err):
-		_, err = secrets.Create(ctx, &corev1.Secret{
-			Name:      s.Name,
-			Namespace: s.Namespace,
-			Type:      corev1.SecretTypeOpaque,
-			Data:      data,
-		}, metav1.CreateOptions{})
-	case err == nil:
-		found.Data = data
-		_, err = secrets.Update(ctx, found, metav1.UpdateOptions{})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.read == nil {
+		return errors.New("the identity Secret is saved only after it is loaded")
+	}
+	updated := s.read.DeepCopy()
+	updated.Data = data
+	written, err := s.client.CoreV1().Secrets(s.namespace).Update(ctx, updated, metav1.UpdateOptions{})
+	if apierrors.IsConflict(err) {
+		return fmt.Errorf("write the identity Secret %s/%s: %w", s.namespace, s.name, clusteridentity.ErrAnotherWriter)
 	}
 	if err != nil {
-		return fmt.Errorf("write the identity Secret %s/%s: %w", s.Namespace, s.Name, err)
+		return fmt.Errorf("write the identity Secret %s/%s: %w", s.namespace, s.name, err)
 	}
+	s.read = written
 	return nil
 }
 

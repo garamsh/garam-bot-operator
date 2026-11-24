@@ -6,6 +6,7 @@ import "context"
 type KeyStore interface {
 	// Load answers the stored State, or ErrNoState.
 	Load(ctx context.Context) (State, error)
-	// Save replaces the stored State.
+	// Save replaces the stored State, and answers ErrAnotherWriter where another process wrote it after
+	// the last Load or Save here.
 	Save(ctx context.Context, state State) error
 }

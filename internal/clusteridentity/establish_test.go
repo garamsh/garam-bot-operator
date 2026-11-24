@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,4 +172,43 @@ func registrationToken(t *testing.T, body []byte) string {
 	}
 	require.NoError(t, json.Unmarshal(body, &sent))
 	return sent.Token
+}
+
+func TestEstablish_StoresTheRegisteredRecordAgainAfterAFailedSave(t *testing.T) {
+	h := newHarness(t)
+	h.mint()
+	failures := 0
+	h.store.fail = func(state clusteridentity.State) error {
+		if state.Record != nil && failures < 2 {
+			failures++
+			return errors.New("the API server is unavailable")
+		}
+		return nil
+	}
+
+	_, err := h.service().Establish(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, h.store.last().Record, "the spent token's record is kept")
+	assert.Equal(t, []time.Duration{time.Second, 2 * time.Second}, h.sleeps)
+	assert.Len(t, h.sent(regPath), 1)
+}
+
+func TestEstablish_LogsAnUnreadableTokenFileOnceByItsPath(t *testing.T) {
+	h := newHarness(t)
+	stop := errors.New("stop")
+	h.onSleep = func(n int, _ time.Duration) error {
+		if n == 3 {
+			return stop
+		}
+		return nil
+	}
+
+	_, err := h.service().Establish(context.Background())
+
+	require.ErrorIs(t, err, stop)
+	logged := h.logged()
+	assert.Equal(t, 1, strings.Count(logged, "registration token file cannot be read"), logged)
+	assert.Contains(t, logged, h.tokenFile())
+	assert.Empty(t, h.sent(regPath))
 }

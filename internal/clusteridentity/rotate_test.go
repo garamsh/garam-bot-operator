@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -220,9 +221,146 @@ func TestRotate_After409(t *testing.T) {
 		kids = h.exchangeKIDs()
 		assert.Equal(t, kid(t, testKeys()[0]), kids[len(kids)-1], "the predecessor goes on signing")
 	})
+	t.Run("an exchange that failed without a refusal is backed off, and the successor kept", func(t *testing.T) {
+		h := newHarness(t)
+		connection := h.establish()
+		successor := kid(t, testKeys()[1])
+		unavailable := false
+		h.setIntercept(func(w http.ResponseWriter, r *http.Request, body []byte, _ http.Handler) bool {
+			switch r.URL.Path {
+			case keysPath:
+				w.WriteHeader(http.StatusConflict)
+				return true
+			case "/oauth/token":
+				values, _ := urlValues(body)
+				if headerKID(t, values.Get("client_assertion")) == successor && !unavailable {
+					unavailable = true
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return true
+				}
+			}
+			return false
+		})
+
+		err := connection.Rotate(context.Background())
+
+		require.ErrorIs(t, err, clusteridentity.ErrTooManyKeys, "the second exchange was refused")
+		assert.Len(t, h.rotations(), 2, "a 503 at the exchange shows nothing, so the rotation was sent again")
+		assert.Equal(t, time.Second, h.sleeps[len(h.sleeps)-1], "T-6: after 1 second")
+	})
 }
 
-func TestEstablish_ResolvesARotationARestartInterrupted(t *testing.T) {
+func TestRotate_GivesUpASendLeftUnansweredAndSendsItAgain(t *testing.T) {
+	h := newHarness(t)
+	h.requestTimeout = 500 * time.Millisecond
+	connection := h.establish()
+	hung := false
+	h.setIntercept(func(_ http.ResponseWriter, r *http.Request, _ []byte, _ http.Handler) bool {
+		if r.URL.Path != keysPath || hung {
+			return false
+		}
+		hung = true
+		<-r.Context().Done()
+		return true
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	require.NoError(t, connection.Rotate(ctx))
+
+	assert.Len(t, h.rotations(), 2, "the send held open was given up within RequestTimeout")
+	assert.Same(t, testKeys()[1], h.store.last().Key)
+}
+
+func TestRotate_BacksOffFrom1SecondDoublingTo60(t *testing.T) {
+	h := newHarness(t)
+	connection := h.establish()
+	h.setIntercept(func(w http.ResponseWriter, r *http.Request, _ []byte, _ http.Handler) bool {
+		if r.URL.Path != keysPath {
+			return false
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return true
+	})
+	waited := len(h.sleeps)
+	stop := errors.New("stop")
+	h.onSleep = func(n int, _ time.Duration) error {
+		if n == waited+9 {
+			return stop
+		}
+		return nil
+	}
+
+	require.ErrorIs(t, connection.Rotate(context.Background()), stop)
+
+	s := time.Second
+	assert.Equal(t, []time.Duration{s, 2 * s, 4 * s, 8 * s, 16 * s, 32 * s, 60 * s, 60 * s, 60 * s}, h.sleeps[waited:])
+}
+
+// failingReader is a Random that cannot be read.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("no randomness") }
+
+func TestRotate_AnswersAJWSItCannotSignWithoutSendingOrWaiting(t *testing.T) {
+	h := newHarness(t)
+	h.random = failingReader{}
+	connection := h.establish()
+	waited := len(h.sleeps)
+
+	err := connection.Rotate(context.Background())
+
+	require.ErrorContains(t, err, "sign the rotation's authorization")
+	assert.Empty(t, h.rotations())
+	assert.Len(t, h.sleeps, waited, "a local failure is not retried as if garam had not answered")
+}
+
+func TestRotate_RunsOneRotationAtATime(t *testing.T) {
+	h := newHarness(t)
+	connection := h.establish()
+	held, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	h.setIntercept(func(_ http.ResponseWriter, r *http.Request, _ []byte, _ http.Handler) bool {
+		if r.URL.Path == keysPath {
+			once.Do(func() {
+				close(held)
+				<-release
+			})
+		}
+		return false
+	})
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { first <- connection.Rotate(context.Background()) }()
+	<-held
+
+	go func() { second <- connection.Rotate(context.Background()) }()
+
+	assert.Never(t, func() bool { return len(h.sent(keysPath)) > 1 }, 300*time.Millisecond, 10*time.Millisecond,
+		"the second rotation waits for the first")
+	close(release)
+	require.NoError(t, <-first)
+	// The second rotates from the successor while the predecessor is in its rollover: garam holds two
+	// live keys already.
+	require.ErrorIs(t, <-second, clusteridentity.ErrTooManyKeys)
+}
+
+func TestRun_StopsWhenAnotherProcessWroteTheIdentity(t *testing.T) {
+	h := newHarness(t)
+	connection := h.establish()
+	h.store.fail = func(state clusteridentity.State) error {
+		if state.Successor != nil {
+			return clusteridentity.ErrAnotherWriter
+		}
+		return nil
+	}
+
+	err := connection.Run(context.Background())
+
+	require.ErrorIs(t, err, clusteridentity.ErrAnotherWriter)
+	assert.Empty(t, h.rotations(), "nothing is sent over a store another process wrote")
+}
+
+func TestRun_ResolvesARotationARestartInterruptedBeforeAnythingElse(t *testing.T) {
 	h := newHarness(t)
 	connection := h.establish()
 	successor := kid(t, testKeys()[1])
@@ -246,11 +384,18 @@ func TestEstablish_ResolvesARotationARestartInterrupted(t *testing.T) {
 	h.setIntercept(nil)
 	h.onSleep = nil
 
+	exchanges := len(h.sent("/oauth/token"))
+
 	restarted, err := h.service().Establish(context.Background())
 
 	require.NoError(t, err)
+	assert.Len(t, h.sent("/oauth/token"), exchanges, "Establish leaves the rotation to Run: the current key is live")
+	waited := len(h.sleeps)
+	h.onSleep = func(int, time.Duration) error { return stop }
+	require.ErrorIs(t, restarted.Run(context.Background()), stop)
 	assert.Len(t, h.rotations(), 1, "the exchange with the successor came before anything else")
-	assert.Same(t, testKeys()[1], h.store.last().Key)
+	assert.Same(t, testKeys()[1], h.store.last().Key, "resolved at once, not at the next due date")
+	assert.Equal(t, []time.Duration{30 * 24 * time.Hour}, h.sleeps[waited:], "then the next rotation is waited for")
 	assert.Equal(t, http.StatusOK, poll(t, restarted.Client(), h.base))
 }
 

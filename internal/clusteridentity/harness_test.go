@@ -74,6 +74,8 @@ func (c *clock) advance(d time.Duration) {
 type memoryStore struct {
 	mu    sync.Mutex
 	saved []clusteridentity.State
+	// fail, where set, is asked before each Save, and its error is the Save's, which keeps nothing.
+	fail func(clusteridentity.State) error
 }
 
 func (m *memoryStore) Load(context.Context) (clusteridentity.State, error) {
@@ -88,6 +90,11 @@ func (m *memoryStore) Load(context.Context) (clusteridentity.State, error) {
 func (m *memoryStore) Save(_ context.Context, state clusteridentity.State) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.fail != nil {
+		if err := m.fail(state); err != nil {
+			return err
+		}
+	}
 	m.saved = append(m.saved, state)
 	return nil
 }
@@ -125,6 +132,9 @@ type harness struct {
 	sleeps    []time.Duration
 	// onSleep, where set, runs at each Sleep, and its error ends the wait with it.
 	onSleep func(n int, d time.Duration) error
+	// random and requestTimeout, where set, are the Service's Random and RequestTimeout.
+	random         io.Reader
+	requestTimeout time.Duration
 }
 
 func newHarness(t *testing.T) *harness {
@@ -168,13 +178,15 @@ func (h *harness) logged() string {
 // returns at once.
 func (h *harness) service() clusteridentity.Service {
 	return clusteridentity.NewService(clusteridentity.Config{
-		BaseURL:   h.base,
-		HTTP:      h.http,
-		TokenFile: h.tokenFile(),
-		Version:   "test",
-		Store:     h.store,
-		Log:       slog.New(slog.NewJSONHandler(h, &slog.HandlerOptions{Level: slog.LevelDebug})),
-		Now:       h.clock.Now,
+		BaseURL:        h.base,
+		HTTP:           h.http,
+		TokenFile:      h.tokenFile(),
+		Version:        "test",
+		Store:          h.store,
+		Log:            slog.New(slog.NewJSONHandler(h, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		Now:            h.clock.Now,
+		Random:         h.random,
+		RequestTimeout: h.requestTimeout,
 		Sleep: func(ctx context.Context, d time.Duration) error {
 			h.mu.Lock()
 			h.sleeps = append(h.sleeps, d)

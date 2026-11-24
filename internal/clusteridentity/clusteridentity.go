@@ -40,4 +40,7 @@ var (
 	ErrTooManyKeys = errors.New("garam holds another key live on this record; the rotation did not take place")
 	// ErrRotationRefused is a rotation garam refused for any other reason. The predecessor goes on signing.
 	ErrRotationRefused = errors.New("garam refused the key rotation")
+	// ErrAnotherWriter is a Save refused because another process wrote the KeyStore after this one read
+	// it. Nothing is written over what the other wrote: the connection takes it up, and Run stops.
+	ErrAnotherWriter = errors.New("another process wrote the cluster's identity after this one read it")
 )
