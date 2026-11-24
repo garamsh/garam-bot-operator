@@ -1,6 +1,7 @@
 package reference
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -75,6 +76,9 @@ type declaredObject struct {
 }
 
 func (s *Server) watchDeclarations(w http.ResponseWriter, r *http.Request) error {
+	if err := s.authenticateFirst(r); err != nil {
+		return err
+	}
 	query := r.URL.Query()
 	wait := maxWait
 	if raw := query.Get("wait"); raw != "" {
@@ -313,7 +317,10 @@ func (s *Server) expireCursors(grn GRN) (Expired, error) {
 // secret only as <secret-name>/<key> (DECL-8), and answers it with only those members.
 func parseDeclaredObject(object json.RawMessage) (json.RawMessage, error) {
 	var parsed declaredObject
-	if err := json.Unmarshal(object, &parsed); err != nil {
+	// UseNumber keeps every number of spec as it was written, rather than as a float64.
+	decoder := json.NewDecoder(bytes.NewReader(object))
+	decoder.UseNumber()
+	if err := decoder.Decode(&parsed); err != nil {
 		return nil, refuse(http.StatusBadRequest, codeInvalidRequest, "DECL-7: the object is not a DeclaredObject")
 	}
 	switch {

@@ -75,6 +75,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) error {
 		return refuse(http.StatusBadRequest, codeInvalidRequest, "connector.version is missing or over 64 characters")
 	}
 	c.keys = map[keyID]*recordKey{key.id: {public: key}}
+	c.held[key.id] = true
 	c.notify()
 	writeJSON(w, http.StatusCreated, Registration{Cluster: c.grn, ClientID: string(c.grn), TokenURL: s.tokenURL()})
 	return nil

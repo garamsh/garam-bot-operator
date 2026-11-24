@@ -73,11 +73,12 @@ type harness struct {
 type options struct {
 	pageSize          int
 	registrationLimit int
+	random            io.Reader
 }
 
 func newHarness(t *testing.T, opts ...func(*options)) *harness {
 	t.Helper()
-	o := options{pageSize: 100}
+	o := options{pageSize: 100, random: rand.Reader}
 	for _, set := range opts {
 		set(&o)
 	}
@@ -90,7 +91,7 @@ func newHarness(t *testing.T, opts ...func(*options)) *harness {
 	c := &clock{now: time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)}
 	server := reference.New(reference.Config{
 		BaseURL: ts.URL, PageSize: o.pageSize, RegistrationLimit: o.registrationLimit,
-		Now: c.Now, Random: rand.Reader,
+		Now: c.Now, Random: o.random,
 	})
 	handler = server.Handler()
 	return &harness{t: t, clock: c, base: ts.URL, http: ts.Client(), fixture: server.Fixture()}
@@ -99,6 +100,8 @@ func newHarness(t *testing.T, opts ...func(*options)) *harness {
 func pageSize(n int) func(*options) { return func(o *options) { o.pageSize = n } }
 
 func registrationLimit(n int) func(*options) { return func(o *options) { o.registrationLimit = n } }
+
+func random(r io.Reader) func(*options) { return func(o *options) { o.random = r } }
 
 // answer is a response read whole.
 type answer struct {

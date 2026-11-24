@@ -19,6 +19,6 @@ All state is in memory and ends with the process.
 ## Where it differs from garam
 
 - **Records:** every record is in the organization `reference`, and its `clientId` is its GRN.
-- **DECL-8 and DECL-9 are judged by member name** until interface 1 names its fields (`garamsh/garam-bot#1193`). In `spec`, at any depth, a member named `images` or ending in `image` names an image, and a member ending in `secret` or `secretRef` must be a `<secret-name>/<key>` string. Case is ignored.
+- **DECL-8 and DECL-9 are judged by member name** until interface 1 names its fields (`garamsh/garam-bot#1193`). In `spec`, at any depth, a member named `images` or ending in `image` names an image, and a member ending in `secret` or `secretRef` must be a `<secret-name>/<key>` string. Case is ignored. `metadata.labels` and `metadata.annotations` are not walked. Replacing this stand-in is #448.
 - **AUTH-4 holds by construction:** it serves no other operation. **AUTH-5 is not served:** the bot-token mint is garam's, and its shape is not part of this interface.
 - **Tombstones are kept until `expire-cursors`,** which satisfies DECL-6's 30 days.

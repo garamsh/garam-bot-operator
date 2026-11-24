@@ -1,7 +1,9 @@
 package reference_test
 
 import (
+	"crypto/rand"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +38,29 @@ func TestAuth_RefusesMissingToken(t *testing.T) {
 	}
 	unauthorizedRotation := h.post(keysPath, "", map[string]any{})
 	assert.Equal(t, http.StatusUnauthorized, unauthorizedRotation.status)
+}
+
+// TestAuth_RefusesMissingTokenBeforeReadingTheRequest holds that a request with no token is 401 even
+// where what it carries would be refused 400 under a live token.
+func TestAuth_RefusesMissingTokenBeforeReadingTheRequest(t *testing.T) {
+	h := newHarness(t)
+	_, bearer := h.connected()
+	cases := map[string]func(bearer string) answer{
+		"declarations with wait over 50": func(bearer string) answer {
+			return h.do(http.MethodGet, declPath+"?wait=51", bearer, "", nil)
+		},
+		"rotation with a body that is not JSON": func(bearer string) answer {
+			return h.do(http.MethodPost, keysPath, bearer, "application/json", []byte("{"))
+		},
+	}
+	for name, call := range cases {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, http.StatusBadRequest, call(bearer).status, "control: under a live token it is a 400")
+			missing := call("")
+			assert.Equal(t, http.StatusUnauthorized, missing.status)
+			assert.Equal(t, "unauthorized", missing.errorCode(t))
+		})
+	}
 }
 
 func TestAuth_RefusesAfterClusterDeleted(t *testing.T) {
@@ -107,6 +132,28 @@ func TestExchange_AnswersMachineTokenV2(t *testing.T) {
 	assert.Equal(t, "Bearer", body["token_type"])
 	assert.EqualValues(t, 3600, body["expires_in"])
 	assert.NotEmpty(t, body["access_token"])
+}
+
+// panicking reads crypto/rand until it is armed, and panics after.
+type panicking struct{ armed atomic.Bool }
+
+func (p *panicking) Read(b []byte) (int, error) {
+	if p.armed.Load() {
+		panic("the random source failed")
+	}
+	return rand.Read(b)
+}
+
+func TestExchange_AnswersServerErrorOnPanic(t *testing.T) {
+	source := &panicking{}
+	h := newHarness(t, random(source))
+	grn := h.register(testKeys()[0])
+	source.armed.Store(true)
+
+	got := h.tryExchange(signed(t, testKeys()[0], testKeys()[0], "JWT", h.claims(grn, h.base+"/oauth/token")), grn)
+
+	assert.Equal(t, http.StatusInternalServerError, got.status)
+	assert.Equal(t, "server_error", got.json(t)["error"])
 }
 
 func TestExchange_RefusesAssertionThatDoesNotHold(t *testing.T) {

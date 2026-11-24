@@ -69,6 +69,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DeclarationPage" }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Throttled" }
@@ -118,7 +119,8 @@ components:
           type: string
           description: >-
             Known codes: invalid_request, registration_refused, invalid_proof,
-            too_many_keys, cursor_expired, report_too_large, throttled, unauthorized.
+            too_many_keys, cursor_expired, report_too_large, throttled, unauthorized,
+            not_found, internal.
         message: { type: string }
     Grn:
       type: string

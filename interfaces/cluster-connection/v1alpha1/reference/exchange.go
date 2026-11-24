@@ -31,6 +31,12 @@ type oauthError struct {
 // exchange answers a client_credentials grant carrying a private_key_jwt assertion signed by a live key
 // of the record its client_id names (AUTH-1), with a token of accessTokenLifetime.
 func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if p := recover(); p != nil {
+			s.cfg.Log.Error("exchange panicked", "trace_id", traceID(), "panic", p)
+			writeJSON(w, http.StatusInternalServerError, oauthError{Error: "server_error", Description: internalError})
+		}
+	}()
 	r.Body = http.MaxBytesReader(w, r.Body, maxExchangeBytes)
 	if err := r.ParseForm(); err != nil {
 		writeJSON(w, http.StatusBadRequest, oauthError{Error: "invalid_request", Description: "the body is not a form"})

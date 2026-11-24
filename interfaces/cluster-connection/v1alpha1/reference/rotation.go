@@ -31,6 +31,9 @@ type KeyRotation struct {
 }
 
 func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request) error {
+	if err := s.authenticateFirst(r); err != nil {
+		return err
+	}
 	var req keyRotationRequest
 	if err := decodeBody(w, r, maxRotationBytes, bodyTooLarge, &req); err != nil {
 		return err
@@ -79,12 +82,12 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request) error {
 		return invalid("authorization or proof", "jti was seen before")
 	}
 
-	if existing, ok := live[successor.id]; ok {
-		if existing.rotation == nil {
-			return refuse(http.StatusBadRequest, codeInvalidRequest, "jwk is the key registration bound, not a successor")
-		}
+	if existing, ok := live[successor.id]; ok && existing.rotation != nil {
 		writeJSON(w, http.StatusCreated, existing.rotation)
 		return nil
+	}
+	if c.held[successor.id] {
+		return refuse(http.StatusBadRequest, codeInvalidRequest, "jwk is a key the record has held, not a new successor")
 	}
 	if len(live) >= 2 {
 		return refuse(http.StatusConflict, codeTooManyKeys, "the record already holds two live keys")
@@ -97,6 +100,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request) error {
 	}
 	answer := &KeyRotation{KID: successor.id, PredecessorRetiresAt: retires}
 	c.keys[successor.id] = &recordKey{public: successor, rotation: answer}
+	c.held[successor.id] = true
 	writeJSON(w, http.StatusCreated, answer)
 	return nil
 }

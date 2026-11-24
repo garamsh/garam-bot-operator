@@ -59,11 +59,7 @@ var (
 
 func (s *Server) report(w http.ResponseWriter, r *http.Request) error {
 	tooLarge := refuse(http.StatusRequestEntityTooLarge, codeReportTooLarge, "the report is over 4 MiB")
-	// Authentication precedes the body, so a request with no live token is 401 whatever it carries.
-	s.mu.Lock()
-	_, err := s.authenticate(r)
-	s.mu.Unlock()
-	if err != nil {
+	if err := s.authenticateFirst(r); err != nil {
 		return err
 	}
 	var report Report

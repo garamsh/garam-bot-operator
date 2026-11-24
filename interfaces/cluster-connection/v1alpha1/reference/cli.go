@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -102,16 +103,10 @@ func runServe(ctx context.Context, dir string, args []string, stdout, stderr io.
 		return fmt.Errorf("listen at %s: %w", *listen, err)
 	}
 	socket := filepath.Join(dir, FixtureSocket)
-	_ = os.Remove(socket)
-	fixture, err := net.Listen("unix", socket)
+	fixture, err := listenFixture(socket)
 	if err != nil {
 		_ = protocol.Close()
-		return fmt.Errorf("listen at %s: %w", socket, err)
-	}
-	if err := os.Chmod(socket, 0o600); err != nil {
-		_ = protocol.Close()
-		_ = fixture.Close()
-		return fmt.Errorf("restrict %s: %w", socket, err)
+		return err
 	}
 	port := protocol.Addr().(*net.TCPAddr).Port
 	baseURL := fmt.Sprintf("https://%s", net.JoinHostPort(*host, fmt.Sprint(port)))
@@ -157,6 +152,26 @@ func runServe(ctx context.Context, dir string, args []string, stdout, stderr io.
 		return nil
 	}
 	return err
+}
+
+// listenFixture listens at socket, created readable by this user alone, since the fixture authenticates
+// nothing. A socket a previous run left there is removed; anything else there is left and refused.
+func listenFixture(socket string) (net.Listener, error) {
+	if info, err := os.Lstat(socket); err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("%s exists and is not a socket", socket)
+		}
+		if err := os.Remove(socket); err != nil {
+			return nil, fmt.Errorf("remove the stale %s: %w", socket, err)
+		}
+	}
+	previous := syscall.Umask(0o077)
+	listener, err := net.Listen("unix", socket)
+	syscall.Umask(previous)
+	if err != nil {
+		return nil, fmt.Errorf("listen at %s: %w", socket, err)
+	}
+	return listener, nil
 }
 
 // runFixture sends one fixture subcommand to the server serving dir, and prints its answer.

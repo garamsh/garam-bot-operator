@@ -125,6 +125,39 @@ func TestMain_ServesTLSFromGeneratedRootAndRunsFixture(t *testing.T) {
 	assert.Equal(t, "not_found", refused["error"])
 }
 
+func TestMain_ServesTheFixtureToThisUserAlone(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ccr")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	served(t, dir)
+
+	info, err := os.Lstat(filepath.Join(dir, reference.FixtureSocket))
+
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSocket)
+	assert.Zero(t, info.Mode().Perm()&0o077, "no group or other permission: %v", info.Mode().Perm())
+}
+
+func TestMain_LeavesAFileThatIsNotASocket(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ccr")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, reference.FixtureSocket)
+	require.NoError(t, os.WriteFile(path, []byte("kept"), 0o600))
+	var stderr bytes.Buffer
+
+	// The deadline ends a serve that started over the file, so that case fails rather than hangs.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	code := reference.Main(ctx, []string{"--dir", dir, "serve"}, io.Discard, &stderr)
+
+	assert.Equal(t, 1, code, stderr.String())
+	kept, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "kept", string(kept))
+}
+
 func TestMain_RefusesUnknownSubcommand(t *testing.T) {
 	var stderr bytes.Buffer
 	unknown := []string{"--dir", t.TempDir(), "nonsense"}

@@ -69,6 +69,8 @@ func digestOf(secret string) digest { return sha256.Sum256([]byte(secret)) }
 type cluster struct {
 	grn  GRN
 	keys map[keyID]*recordKey
+	// held is every key the record has held, live or not, so none of them is made live again (ROT-4).
+	held map[keyID]bool
 	// log holds every change written after purgedThrough, in write order.
 	log           []change
 	head          int64
@@ -156,7 +158,9 @@ func (s *Server) newCluster() (*cluster, error) {
 		return nil, err
 	}
 	grn := GRN(fmt.Sprintf("grn:%s/iam/cluster/%s", org, id))
-	c := &cluster{grn: grn, keys: map[keyID]*recordKey{}, purgedThrough: -1, wake: make(chan struct{})}
+	c := &cluster{
+		grn: grn, keys: map[keyID]*recordKey{}, held: map[keyID]bool{}, purgedThrough: -1, wake: make(chan struct{}),
+	}
 	s.clusters[grn] = c
 	return c, nil
 }
@@ -200,6 +204,15 @@ func (s *Server) authenticate(r *http.Request) (*cluster, error) {
 	}
 	c.lastContactAt = now
 	return c, nil
+}
+
+// authenticateFirst refuses a request with no live token before anything else of it is read, so every
+// such request is answered 401 whatever else it carries (AUTH-2).
+func (s *Server) authenticateFirst(r *http.Request) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.authenticate(r)
+	return err
 }
 
 // replayed records a verified jti for audience, answering whether it was seen before. The caller holds s.mu.

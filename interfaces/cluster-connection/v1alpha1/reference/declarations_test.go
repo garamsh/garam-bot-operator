@@ -251,6 +251,18 @@ func TestDeclare_RefusesObjectsBreakingDECL7To9(t *testing.T) {
 		"control: a valid object is stored and sent, and none of the refused ones is")
 }
 
+func TestDeclare_KeepsNumbersAsWritten(t *testing.T) {
+	h := newHarness(t)
+	grn, bearer := h.connected()
+	object := bot("a")
+	object["spec"].(map[string]any)["replicas"] = json.Number("9007199254740993")
+	h.declare(grn, "", object)
+
+	sent := string(h.poll(bearer, "", 0).page(t).Changes[0].Object)
+
+	assert.Contains(t, sent, `"replicas":9007199254740993`, "2^53+1 is sent exactly, not rounded through a float64")
+}
+
 func TestDeclare_SendsOnlyDECL7Members(t *testing.T) {
 	h := newHarness(t)
 	grn, bearer := h.connected()

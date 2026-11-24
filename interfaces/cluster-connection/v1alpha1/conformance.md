@@ -13,7 +13,7 @@ There are two suites. Each reaches an implementation only through the protocol a
 
 ### The server fixture
 
-Each subcommand exits 0 and prints its answer as one JSON object, or exits non-zero and prints T-5's error body.
+Each subcommand exits 0 and prints its answer as one JSON object, or, when the server refuses it, exits non-zero and prints T-5's error body.
 
 | Subcommand | Does | Prints |
 |---|---|---|
@@ -53,6 +53,7 @@ The suites are built under `conformance/` beside this file, as tests that run ag
 | `server/rotation/refuses-authorization-by-retired-key` | ROT-2 |
 | `server/rotation/repeat-answers-first-success` | ROT-4 |
 | `server/rotation/refuses-third-key` | ROT-4 |
+| `server/rotation/refuses-key-held-before` | ROT-4 |
 | `server/rotation/predecessor-live-24h` | ROT-3 |
 | `server/declarations/full-set-without-cursor` | DECL-1, DECL-5 |
 | `server/declarations/changes-in-write-order` | DECL-2 |

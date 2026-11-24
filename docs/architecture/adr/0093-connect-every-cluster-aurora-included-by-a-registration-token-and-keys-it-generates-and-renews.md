@@ -16,9 +16,11 @@ The owner's direction of 2026-11-24 (`garamsh/discussions` discussion 6, comment
 
 ADR 0088 already decides that the connector works this way. No ADR states it as the rule for every cluster, and none names aurora.
 
+This project once had a one-time-token path for the manager, and removed it. Under ADR 0020 to ADR 0022 the manager enrolled with a token and obtained a client certificate. ADR 0072 removed that enrolment when garam replaced client certificates with keys under `machine-token.v2` (garam ADR-0102), and ADR 0068 keeps no second path beside the one in use. That ground was the credential's kind, not registration. ADR 0088's registration ends in a key under `machine-token.v2`, generated and renewed in the cluster under the cluster-connection interface, so the reason for the removal does not reach it.
+
 ## Decision
 
-1. **A cluster is connected to garam by a registration token, given once at install.** No private key is issued by garam, carried by a person, or placed into any process by hand.
+1. **Every path this project adds for a cluster to reach garam starts from a registration token, given once at install.** On such a path no private key is issued by garam, carried by a person, or placed into any process by hand. The one standing exception is the issued keys of ADR 0072 decision 1, for the manager and the control service, until an ADR supersedes that decision (decision 5).
 2. **The key is generated in the process that holds it.** It is kept in that process and in one Secret in its release namespace, and nowhere else (ADR 0088 decisions 3 and 4, ADR 0091 decision 5).
 3. **The cluster renews its own key, without a person.** The connector does it by ROT-1 to ROT-5 every 30 days (ADR 0088 decision 6). A lost key is replaced by registering again with a new token (ADR 0088 decision 7).
 4. **aurora connects by the same path**, through the connector chart and a cluster record of its own, and not by a path of its own.

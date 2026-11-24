@@ -158,6 +158,44 @@ func TestRotateKey_RepeatAnswersFirstSuccess(t *testing.T) {
 	assert.Equal(t, first.json(t), repeat.json(t))
 }
 
+func TestRotateKey_RefusesKeyTheRecordHasHeld(t *testing.T) {
+	first, second, third := testKeys()[0], testKeys()[1], testKeys()[2]
+	cases := map[string]func(h *harness) (reference.GRN, string, *rsa.PrivateKey, *rsa.PrivateKey){
+		"the key registration bound": func(h *harness) (reference.GRN, string, *rsa.PrivateKey, *rsa.PrivateKey) {
+			grn := h.register(first)
+			return grn, h.exchange(grn, first), first, first
+		},
+		"a predecessor past its rollover": func(h *harness) (reference.GRN, string, *rsa.PrivateKey, *rsa.PrivateKey) {
+			grn := h.register(first)
+			require.Equal(h.t, http.StatusCreated, h.post(keysPath, h.exchange(grn, first),
+				h.rotationBody(grn, rotation{current: first, successor: second})).status)
+			h.clock.advance(24 * time.Hour)
+			return grn, h.exchange(grn, second), second, first
+		},
+		"a key a later registration withdrew": func(h *harness) (reference.GRN, string, *rsa.PrivateKey, *rsa.PrivateKey) {
+			grn := h.register(first)
+			again := h.fix("mint-token", reference.FixtureRequest{Cluster: grn})
+			require.Equal(h.t, http.StatusCreated,
+				h.post(regPath, "", registration(again["registrationToken"].(string), publicJWK(h.t, second))).status)
+			return grn, h.exchange(grn, second), second, first
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			grn, bearer, current, held := setup(h)
+
+			got := h.post(keysPath, bearer, h.rotationBody(grn, rotation{current: current, successor: held}))
+
+			assert.Equal(t, http.StatusBadRequest, got.status, string(got.body))
+			assert.Equal(t, "invalid_request", got.errorCode(t))
+			assert.Equal(t, http.StatusCreated,
+				h.post(keysPath, bearer, h.rotationBody(grn, rotation{current: current, successor: third})).status,
+				"control: the same rotation to a key never held is accepted")
+		})
+	}
+}
+
 func TestRotateKey_RefusesThirdKey(t *testing.T) {
 	h := newHarness(t)
 	first, second, third := testKeys()[0], testKeys()[1], testKeys()[2]

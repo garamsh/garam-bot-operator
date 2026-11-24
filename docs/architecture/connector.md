@@ -80,8 +80,8 @@ These are obligations on `garamsh/garam`, for that repository to decide and buil
 
 - **Why a connector rather than garam reaching the cluster:** the decision of 2026-11-24 (`garamsh/naru#373` §3) and ADR 0087's precedents.
 - **Why long-poll:** ADR 0087's comparison. gRPC streams and WebSocket tunnels need a sticky replica, and a tunnel opens a path into the cluster.
-- **Why a key generated in the cluster:** ADR 0088.
-- **Why every cluster, aurora included:** the owner's direction of 2026-11-24, recorded in ADR 0093. Its precedents are GitHub Actions runners and Actions Runner Controller, and the Rancher agent. The precedents are the GitHub runner's local RSA key and Open Cluster Management's klusterlet.
+- **Why a key generated in the cluster:** ADR 0088. The precedents are the GitHub runner's local RSA key and Open Cluster Management's klusterlet.
+- **Why every cluster, aurora included:** the owner's direction of 2026-11-24, recorded in ADR 0093. Its precedents are GitHub Actions runners and Actions Runner Controller, and the Rancher agent.
 - **Why one owner per object:** the 11-21 decision's managed-by (ADR 0089). The precedent is argocd-agent's managed and autonomous modes, chosen here per object.
 - **Why two programs:** ADR 0090. ADR 0079's seam keeps identity provisioning outside the manager, and it keeps the key and the right to build workloads in different Pods.
 - **Why namespaced rights and no images in declarations:** ADR 0091. They bound what a compromised garam or a stolen cluster token can do in a user's cluster.
@@ -89,7 +89,7 @@ These are obligations on `garamsh/garam`, for that repository to decide and buil
 
 ## Open questions
 
-- **How the manager and the control service reach garam without an issued key.** aurora places their keys by hand today, under ADR 0072. ADR 0093 decision 5 keeps those keys in place until an ADR moves both processes onto the registration path.
+- **How the manager and the control service reach garam without an issued key.** Asked in `configuration.md` §Open questions, which describes those two processes' keys.
 - **A cluster-owned bot's garam identity.** Does it get a GRN and tokens, and on whose authority?
 - **Adoption.** An explicit action that moves an object between `garam` and the cluster as owner.
 - **Several bots in one pod.** The 11-21 decision's one pod per organization, with a process per bot, waits for a garam-bot runtime that runs several bots. This goal runs one Bot per StatefulSet.
