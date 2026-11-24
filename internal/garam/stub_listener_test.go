@@ -159,7 +159,7 @@ func trustedBy(t *testing.T, stub *stubListener) http.RoundTripper {
 	base := &http.Transport{TLSClientConfig: tlsConfig}
 	source := machinetoken.NewSource(machinetoken.Config{
 		Endpoint: "https://" + stub.address() + tokenPath,
-		Files:    writeKeyIssuance(t, t.TempDir()),
+		Identity: writeKeyIssuance(t, t.TempDir()),
 		HTTP:     &http.Client{Transport: base},
 	})
 	return &machinetoken.Transport{Source: source, Base: base}

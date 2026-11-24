@@ -1,15 +1,30 @@
 package machinetoken
 
 import (
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"time"
 )
 
-// Files names the three files a deployer places from one key issuance (garam@9ba35c3
-// api/openapi.yaml IssuedOperatorKey): the private key, the operator GRN garam answered as
-// clientId, and the tokenUrl every assertion names as its audience. All three are read at each
-// exchange, so a key replaced in place is the one the next exchange signs with.
+// Identity is what an exchange signs as. Signer is called at each exchange, so a key replaced in the
+// Identity is the one the next exchange signs with.
+type Identity interface {
+	Signer() (Signer, error)
+}
+
+// Signer is one read of an Identity: the key an exchange signs with, the client_id it names, and the
+// tokenUrl every assertion names as its audience.
+type Signer struct {
+	Key      *rsa.PrivateKey
+	ClientID string
+	TokenURL string
+}
+
+// Files is the Identity of an issued key, as the three files a deployer places from one key issuance
+// (garam@9ba35c3 api/openapi.yaml IssuedOperatorKey): the private key, the operator GRN garam
+// answered as clientId, and the tokenUrl every assertion names as its audience. All three are read
+// at each exchange, so a key replaced in place is the one the next exchange signs with.
 type Files struct {
 	PrivateKey string
 	ClientID   string

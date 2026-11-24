@@ -24,41 +24,34 @@ const assertionLifetime = 60 * time.Second
 // garam's 22 to 128.
 const jtiBytes = 32
 
-// identity is one read of the three files: the key an exchange signs with, and the values it names.
-type identity struct {
-	key      *rsa.PrivateKey
-	clientID string
-	tokenURL string
-}
-
-// readIdentity reads the three files once. A key is never part of what it reports.
-func readIdentity(files Files) (identity, error) {
+// Signer reads the three files once. A key is never part of what it reports.
+func (files Files) Signer() (Signer, error) {
 	clientID, err := readValue(files.ClientID, "client_id")
 	if err != nil {
-		return identity{}, err
+		return Signer{}, err
 	}
 	tokenURL, err := readValue(files.TokenURL, "tokenUrl")
 	if err != nil {
-		return identity{}, err
+		return Signer{}, err
 	}
 	encoded, err := os.ReadFile(files.PrivateKey)
 	if err != nil {
-		return identity{}, fmt.Errorf("read the private key file: %w", err)
+		return Signer{}, fmt.Errorf("read the private key file: %w", err)
 	}
 	block, _ := pem.Decode(encoded)
 	if block == nil || block.Type != "PRIVATE KEY" {
-		return identity{}, errors.New("the private key file holds no PKCS#8 PRIVATE KEY PEM block")
+		return Signer{}, errors.New("the private key file holds no PKCS#8 PRIVATE KEY PEM block")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		// The parser's error names a structure, never key material.
-		return identity{}, fmt.Errorf("parse the private key: %w", err)
+		return Signer{}, fmt.Errorf("parse the private key: %w", err)
 	}
 	key, ok := parsed.(*rsa.PrivateKey)
 	if !ok {
-		return identity{}, errors.New("the private key is not an RSA key, and garam verifies RS256 alone")
+		return Signer{}, errors.New("the private key is not an RSA key, and garam verifies RS256 alone")
 	}
-	return identity{key: key, clientID: clientID, tokenURL: tokenURL}, nil
+	return Signer{Key: key, ClientID: clientID, TokenURL: tokenURL}, nil
 }
 
 // ReadClientID reads the client_id file: the operator GRN its tokens are exchanged under.
@@ -81,8 +74,8 @@ func readValue(path, name string) (string, error) {
 
 // sign makes one assertion over id's key, naming the kid of that same key, a jti fresh from random,
 // and iat at now.
-func sign(id identity, now time.Time, random io.Reader) (string, error) {
-	kid, err := thumbprint(&id.key.PublicKey)
+func sign(id Signer, now time.Time, random io.Reader) (string, error) {
+	kid, err := thumbprint(&id.Key.PublicKey)
 	if err != nil {
 		return "", err
 	}
@@ -91,7 +84,7 @@ func sign(id identity, now time.Time, random io.Reader) (string, error) {
 		return "", fmt.Errorf("draw an assertion's jti: %w", err)
 	}
 	signer, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: jose.RS256, Key: jose.JSONWebKey{Key: id.key, KeyID: kid}},
+		jose.SigningKey{Algorithm: jose.RS256, Key: jose.JSONWebKey{Key: id.Key, KeyID: kid}},
 		(&jose.SignerOptions{}).WithType("JWT"),
 	)
 	if err != nil {
@@ -99,9 +92,9 @@ func sign(id identity, now time.Time, random io.Reader) (string, error) {
 	}
 	issued := now.Truncate(time.Second)
 	return jwt.Signed(signer).Claims(jwt.Claims{
-		Issuer:   id.clientID,
-		Subject:  id.clientID,
-		Audience: jwt.Audience{id.tokenURL},
+		Issuer:   id.ClientID,
+		Subject:  id.ClientID,
+		Audience: jwt.Audience{id.TokenURL},
 		IssuedAt: jwt.NewNumericDate(issued),
 		Expiry:   jwt.NewNumericDate(issued.Add(assertionLifetime)),
 		ID:       base64.RawURLEncoding.EncodeToString(nonce),

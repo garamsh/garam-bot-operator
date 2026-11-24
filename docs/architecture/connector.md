@@ -2,7 +2,7 @@
 
 How a user's own cluster is connected to garam: the chart a user installs, the connector program in it, its registration and identity, the declarations it syncs both ways, the rights it holds in the cluster, and what garam owes on its side.
 
-None of it is built yet. This document states what is decided. Goal #436 lists the implementation issues, and each section names the decision it holds.
+Registration and identity are built, in `cmd/connector` and `internal/clusteridentity` (#440). The rest is not built yet. This document states what is decided. Goal #436 lists the implementation issues, and each section names the decision it holds.
 
 ## Current decisions
 
@@ -30,7 +30,8 @@ These follow [ADR 0088](adr/0088-register-a-connector-with-a-one-time-token-and-
 - **Every cluster connects this way, aurora included.** Its only credential at install is a registration token given once. Its key is generated in the process that holds it, kept there and in one Secret, and renewed without a person. No key is issued by garam or placed by hand.
 - **A cluster is a garam resource, `grn:<org>/iam/cluster/<id>`, in one organization.** One chart release is one record. A second organization on the same cluster is a second release in another namespace.
 - **Registration spends a one-time token.** The token lives one hour, is good for one attempt, and garam keeps only its hash. The connector generates an RSA 3072 key itself and sends the public JWK with the token.
-- **The private key never leaves the cluster.** It exists in the connector's process and in one Secret in the release namespace.
+- **The private key never leaves the cluster.** It exists in the connector's process and in one Secret in the release namespace, which `--identity-secret` names. That Secret also holds the record, the successor while a rotation is unresolved, and the SHA-256 of the registration token last presented, never the token. The connector never writes the key to a file, and signs each exchange with the key it holds through `internal/machinetoken`'s `Identity`.
+- **A registration token is presented once.** The connector records the attempt before it sends the token. After any answer but 429, or after none, it waits for a different token in its token file, across restarts too (REG-7).
 - **The connector authenticates as garam's other machine callers do,** by `private_key_jwt` under `machine-token.v2`, through `internal/machinetoken`.
 - **It rotates its own key every 30 days.** The rotation call carries an authorization the current key signed, naming the successor, and a proof the successor signed. The bearer token alone rotates nothing. garam's 24-hour rollover holds both keys live. A repeated rotation answers as the first did, and a connector with no answer tries its stored successor.
 - **Revocation is garam's**: withdrawing a key or deleting the record refuses the next request. A lost key is registered again under the same record.
